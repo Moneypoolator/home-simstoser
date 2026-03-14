@@ -4,12 +4,15 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <glog/logging.h>
+#include "logging.hpp"
 
 namespace json = nlohmann;
 
 request_handler::request_handler(file_manager& file_manager)
     : _file_manager(file_manager)
 {
+    VLOG(1) << "Request handler initialized";
 }
 
 template<class body, class allocator>
@@ -28,6 +31,7 @@ void request_handler::handle_request(
     
     // CORS preflight
     if (req.method() == http::verb::options) {
+        VLOG(2) << "Handling CORS preflight request";
         response.result(http::status::ok);
         response.set(http::field::content_type, "text/plain");
         response.body() = "OK";
@@ -167,6 +171,7 @@ http::response<http::string_body> request_handler::handle_get(const http::reques
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
+        LOG(WARNING) << "GET request with empty filename";
         return create_response(
             http::status::bad_request,
             R"({"error": "Filename is required"})"
@@ -176,6 +181,7 @@ http::response<http::string_body> request_handler::handle_get(const http::reques
     auto file_data = _file_manager.download_file(filename);
     
     if (!file_data) {
+        LOG(WARNING) << "File not found: " << filename;
         return create_response(
             http::status::not_found,
             R"({"error": "File not found"})"
@@ -195,6 +201,7 @@ http::response<http::string_body> request_handler::handle_get(const http::reques
     
     res.body() = std::string(file_data->begin(), file_data->end());
     
+    LOG(INFO) << "File served successfully: " << filename;
     return res;
 }
 
@@ -203,6 +210,7 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
+        LOG(WARNING) << "PUT request with empty filename";
         return create_response(
             http::status::bad_request,
             R"({"error": "Filename is required"})"
@@ -212,6 +220,7 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
     std::vector<char> data(req.body().begin(), req.body().end());
     
     if (data.empty()) {
+        LOG(WARNING) << "PUT request with empty body for file: " << filename;
         return create_response(
             http::status::bad_request,
             R"({"error": "File content is required"})"
@@ -221,6 +230,7 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
     bool success = _file_manager.upload_file(filename, data);
     
     if (!success) {
+        LOG(ERROR) << "Failed to upload file: " << filename;
         return create_response(
             http::status::internal_server_error,
             R"({"error": "Failed to upload file"})"
@@ -237,6 +247,8 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
         response_json["etag"] = metadata->etag;
     }
     
+    LOG(INFO) << "File uploaded successfully: " << filename << " (" 
+              << std::to_string(data.size()) << " bytes)";
     return create_response(http::status::created, response_json.dump());
 }
 
@@ -245,6 +257,7 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
+        LOG(WARNING) << "DELETE request with empty filename";
         return create_response(
             http::status::bad_request,
             R"({"error": "Filename is required"})"
@@ -252,6 +265,7 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     }
     
     if (!_file_manager.file_exists(filename)) {
+        LOG(WARNING) << "Attempted to delete non-existent file: " << filename;
         return create_response(
             http::status::not_found,
             R"({"error": "File not found"})"
@@ -261,6 +275,7 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     bool success = _file_manager.delete_file(filename);
     
     if (!success) {
+        LOG(ERROR) << "Failed to delete file: " << filename;
         return create_response(
             http::status::internal_server_error,
             R"({"error": "Failed to delete file"})"
@@ -271,10 +286,11 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     response_json["success"] = true;
     response_json["message"] = "File deleted successfully";
     
+    LOG(INFO) << "File deleted successfully: " << filename;
     return create_response(http::status::ok, response_json.dump());
 }
 
-http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& req)
+http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& /*req*/)
 {
     auto files = _file_manager.list_files();
     
@@ -300,6 +316,7 @@ http::response<http::string_body> request_handler::handle_list(const http::reque
         response_json["files"].push_back(file_json);
     }
     
+    LOG(INFO) << "Listed " << std::to_string(files.size()) << " files";
     return create_response(http::status::ok, response_json.dump());
 }
 
@@ -429,6 +446,7 @@ http::response<http::string_body> request_handler::handle_complete_upload(const 
         
         return create_response(http::status::ok, response_json.dump());
     } catch (const json::json::exception& e) {
+    	LOG(ERROR) << "Exception handling request: " << e.what();
         return create_response(
             http::status::bad_request,
             R"({"error": "Invalid request body"})"

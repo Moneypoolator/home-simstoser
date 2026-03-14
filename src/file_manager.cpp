@@ -7,13 +7,15 @@
 #include <openssl/evp.h>
 #include <random>
 #include <algorithm>
-
+#include <glog/logging.h>
+#include "logging.hpp"
 
 file_manager::file_manager(const std::string& storage_path)
     : _storage_dir(storage_path)
 {
     // Создаем директорию для хранения, если она не существует
     fs::create_directories(_storage_dir);
+    LOG(INFO) << "File manager initialized. Storage path: " << _storage_dir.string();
 }
 
 file_manager::~file_manager()
@@ -25,12 +27,14 @@ file_manager::~file_manager()
             fs::remove_all(upload.temp_dir);
         }
     }
+    VLOG(1) << "File manager destroyed";
 }
 
 
 bool file_manager::upload_file(const std::string& filename, const std::vector<char>& data)
 {
     if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
         return false;
     }
 
@@ -43,15 +47,22 @@ bool file_manager::upload_file(const std::string& filename, const std::vector<ch
         // Записываем файл
         std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
         if (!file) {
+            LOG(ERROR) << "Failed to open file for writing: " << file_path.string();
             return false;
         }
         
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
         file.close();
         
-        return file.good();
+        if (file.good()) {
+            logging::log_file_operation("UPLOAD", filename, data.size());
+            return true;
+        } else {
+            LOG(ERROR) << "Failed to write file: " << filename;
+            return false;
+        }
     } catch (const std::exception& e) {
-        // Логирование ошибки (можно добавить логгер)
+        LOG(ERROR) << "Exception during file upload: " << e.what();
         return false;
     }
 }
@@ -59,6 +70,7 @@ bool file_manager::upload_file(const std::string& filename, const std::vector<ch
 std::optional<std::vector<char>> file_manager::download_file(const std::string& filename)
 {
     if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
         return std::nullopt;
     }
 
@@ -66,11 +78,13 @@ std::optional<std::vector<char>> file_manager::download_file(const std::string& 
         fs::path file_path = _storage_dir / filename;
         
         if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
+            VLOG(1) << "File not found: " << filename;
             return std::nullopt;
         }
         
         std::ifstream file(file_path, std::ios::binary | std::ios::ate);
         if (!file) {
+            LOG(ERROR) << "Failed to open file for reading: " << file_path.string();
             return std::nullopt;
         }
         
@@ -79,9 +93,12 @@ std::optional<std::vector<char>> file_manager::download_file(const std::string& 
         
         file.seekg(0, std::ios::beg);
         file.read(data.data(), file_size);
+        file.close();
         
+        logging::log_file_operation("DOWNLOAD", filename, file_size);
         return data;
     } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during file download: " << e.what();
         return std::nullopt;
     }
 }

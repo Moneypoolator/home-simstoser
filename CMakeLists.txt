@@ -6,9 +6,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release)
 
 # Найти зависимости
-find_package(Boost 1.75 REQUIRED COMPONENTS system)
+find_package(Boost 1.74 REQUIRED COMPONENTS system)
 find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(glog REQUIRED)
+find_package(Threads REQUIRED)
+
 
 # Исходники
 set(sources
@@ -32,6 +35,7 @@ add_executable(s3_server ${sources} ${headers})
 target_include_directories(s3_server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${Boost_INCLUDE_DIRS}
+    ${GLOG_INCLUDE_DIRS}
 )
 
 # Линковка
@@ -39,6 +43,8 @@ target_link_libraries(s3_server PRIVATE
     Boost::system
     OpenSSL::SSL
     OpenSSL::Crypto
+    glog::glog
+    Threads::Threads
     nlohmann_json::nlohmann_json
 )
 
@@ -60,3 +66,4 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -O2
     )
 endif()
+
