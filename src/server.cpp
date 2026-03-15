@@ -6,13 +6,25 @@
 #include <chrono>
 #include <glog/logging.h>
 
-s3_server::s3_server(const std::string& address, unsigned short port, const std::string& storage_path)
+s3_server::s3_server(const std::string& address, 
+                     unsigned short port, 
+                     const std::string& storage_path,
+                     std::optional<ssl_config> ssl_cfg)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
     , _acceptor(_io_context)
+    , _ssl_config(std::move(ssl_cfg))
 {
-    LOG(INFO) << "S3 server created: " << address << ":" << port;
+    _ssl_enabled = _ssl_config.has_value();
+    
+    if (_ssl_enabled) {
+        LOG(INFO) << "S3 server created with SSL: " << address << ":" << port;
+        LOG(INFO) << "Certificate: " << _ssl_config->cert_file;
+    } else {
+        LOG(INFO) << "S3 server created (HTTP only): " << address << ":" << port;
+    }
+    
     LOG(INFO) << "Storage path: " << storage_path;
 }
 
@@ -35,7 +47,9 @@ void s3_server::run(std::size_t threads)
         _acceptor.bind(endpoint);
         _acceptor.listen(asio::socket_base::max_listen_connections);
         
-        LOG(INFO) << "Starting S3-compatible server on " << _address << ":" << _port;
+        LOG(INFO) << "Starting S3-compatible server on " 
+                  << (_ssl_enabled ? "https" : "http") 
+                  << "://" << _address << ":" << _port;
         LOG(INFO) << "Using " << threads << " threads";
         
         _running = true;
@@ -91,10 +105,36 @@ void s3_server::do_accept()
             if (!ec) {
                 VLOG(1) << "New connection accepted";
                 
-                // Запускаем обработку сессии в отдельном потоке
-                std::thread([this, socket = std::move(socket)]() mutable {
-                    handle_session(std::move(socket));
-                }).detach();
+                if (_ssl_enabled) {
+                    // Создаем и настраиваем SSL контекст
+                    auto ssl_ctx = setup_ssl_context();
+                    if (ssl_ctx) {
+                        // Создаем зашифрованное соединение
+                        auto ssl_socket = std::make_shared<ssl::stream<tcp::socket>>(
+                            std::move(socket), *ssl_ctx
+                        );
+                        
+                        // Выполняем рукопожатие SSL
+                        ssl_socket->async_handshake(
+                            ssl::stream_base::server,
+                            [this, ssl_socket](const beast::error_code& ec_handshake) {
+                                if (!ec_handshake) {
+                                    // Запускаем обработку зашифрованной сессии
+                                    std::thread([this, ssl_socket]() mutable {
+                                        handle_ssl_session(std::move(*ssl_socket));
+                                    }).detach();
+                                } else {
+                                    LOG(ERROR) << "SSL handshake failed: " << ec_handshake.message();
+                                }
+                            }
+                        );
+                    }
+                } else {
+                    // Запускаем обработку обычной сессии
+                    std::thread([this, socket = std::move(socket)]() mutable {
+                        handle_session(std::move(socket));
+                    }).detach();
+                }
             } else {
                 if (ec != asio::error::operation_aborted) {
                     LOG(WARNING) << "Accept error: " << ec.message();
@@ -109,6 +149,48 @@ void s3_server::do_accept()
     );
 }
 
+std::shared_ptr<ssl::context> s3_server::setup_ssl_context()
+{
+    try {
+        auto ctx = std::make_shared<ssl::context>(ssl::context::tlsv12_server);
+        
+        // Загружаем сертификат сервера
+        ctx->use_certificate_chain_file(_ssl_config->cert_file);
+        
+        // Загружаем приватный ключ
+        ctx->use_private_key_file(_ssl_config->private_key, ssl::context::pem);
+        
+        // Устанавливаем опции для безопасности
+        ctx->set_options(
+            ssl::context::default_workarounds |
+            ssl::context::no_sslv2 |
+            ssl::context::no_sslv3 |
+            ssl::context::no_tlsv1 |
+            ssl::context::no_tlsv1_1 |
+            ssl::context::single_dh_use
+        );
+        
+        // Настройка Diffie-Hellman параметров (если указаны)
+        if (_ssl_config->dh_file) {
+            ctx->use_tmp_dh_file(*_ssl_config->dh_file);
+        }
+        
+        // Настройка проверки клиента (если требуется)
+        if (_ssl_config->verify_client) {
+            ctx->set_verify_mode(ssl::verify_peer | ssl::verify_fail_if_no_peer_cert);
+        } else {
+            ctx->set_verify_mode(ssl::verify_none);
+        }
+        
+        VLOG(1) << "SSL context configured successfully";
+        return ctx;
+        
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to setup SSL context: " << e.what();
+        return nullptr;
+    }
+}
+
 void s3_server::handle_session(tcp::socket socket)
 {
     auto start_time = std::chrono::steady_clock::now();
@@ -120,9 +202,9 @@ void s3_server::handle_session(tcp::socket socket)
         auto remote_endpoint = socket.remote_endpoint(ec);
         std::string client_info;
         if (!ec) {
-            client_info = remote_endpoint.address().to_string() + 
+            client_info = remote_endpoint.address().to_string() +
                          ":" + std::to_string(remote_endpoint.port());
-            VLOG(2) << "Handling session from " << client_info;
+            VLOG(2) << "Handling HTTP session from " << client_info;
         }
         
         // Создаем объекты для чтения/записи
@@ -140,8 +222,8 @@ void s3_server::handle_session(tcp::socket socket)
         
         // ЯВНОЕ ПРЕОБРАЗОВАНИЕ string_view В string
         logging::log_request(
-            std::string(req.method_string()), 
-            std::string(req.target()), 
+            std::string(req.method_string()),
+            std::string(req.target()),
             client_info
         );
         
@@ -152,7 +234,7 @@ void s3_server::handle_session(tcp::socket socket)
         // Обрабатываем запрос
         handler.handle_request(
             std::move(req),
-            [&socket, start_time](http::response<http::string_body>&& res) {  // Убрали неиспользуемый захват this
+            [&socket, start_time](http::response<http::string_body>&& res) {
                 beast::error_code ec;
                 
                 // Отправляем ответ
@@ -178,5 +260,77 @@ void s3_server::handle_session(tcp::socket socket)
         );
     } catch (const std::exception& e) {
         LOG(ERROR) << "Session error: " << e.what();
+    }
+}
+
+void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket)
+{
+    auto start_time = std::chrono::steady_clock::now();
+    
+    try {
+        beast::error_code ec;
+        
+        // Получаем информацию о клиенте
+        auto remote_endpoint = socket.next_layer().remote_endpoint(ec);
+        std::string client_info;
+        if (!ec) {
+            client_info = remote_endpoint.address().to_string() +
+                         ":" + std::to_string(remote_endpoint.port());
+            VLOG(2) << "Handling HTTPS session from " << client_info;
+        }
+        
+        // Создаем объекты для чтения/записи
+        beast::flat_buffer buffer;
+        http::request<http::string_body> req;
+        
+        // Читаем запрос через зашифрованное соединение
+        http::read(socket, buffer, req, ec);
+        if (ec) {
+            if (ec != beast::http::error::end_of_stream) {
+                LOG(WARNING) << "SSL read error: " << ec.message();
+            }
+            return;
+        }
+        
+        // ЯВНОЕ ПРЕОБРАЗОВАНИЕ string_view В string
+        logging::log_request(
+            std::string(req.method_string()),
+            std::string(req.target()),
+            client_info
+        );
+        
+        // Создаем менеджер файлов и обработчик запросов
+        file_manager fm(_storage_path);
+        request_handler handler(fm);
+        
+        // Обрабатываем запрос
+        handler.handle_request(
+            std::move(req),
+            [&socket, start_time](http::response<http::string_body>&& res) {
+                beast::error_code ec;
+                
+                // Отправляем ответ через зашифрованное соединение
+                http::write(socket, res, ec);
+                if (ec) {
+                    LOG(ERROR) << "SSL write error: " << ec.message();
+                } else {
+                    // Логируем время обработки
+                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start_time
+                    );
+                    VLOG(1) << "SSL request handled in " << duration.count() << "ms";
+                    
+                    // Логируем ответ
+                    logging::log_response(static_cast<int>(res.result()));
+                }
+                
+                // Закрываем зашифрованное соединение
+                socket.shutdown(ec);
+                socket.next_layer().shutdown(tcp::socket::shutdown_send, ec);
+                socket.next_layer().close(ec);
+            }
+        );
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "SSL session error: " << e.what();
     }
 }

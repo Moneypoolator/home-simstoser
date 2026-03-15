@@ -62,3 +62,18 @@ curl -X POST "http://localhost:9000/upload/complete?upload_id=a1b2c3d4e5f6" \
 
 # 6. Отменить загрузку (если нужно)
 curl -X DELETE "http://localhost:9000/upload/abort?upload_id=a1b2c3d4e5f6"
+
+
+# Тестирование HTTPS:
+
+# Автоматическая генерация сертификата и запуск
+./s3_server --ssl --port 9443
+
+# Использование собственных сертификатов
+./s3_server --ssl --cert /path/to/cert.pem --key /path/to/key.pem --port 9443
+
+# С использованием curl
+curl -k https://localhost:9443/list
+
+# С указанием сертификата
+curl --cacert ./certs/server.crt https://localhost:9443/list

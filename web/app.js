@@ -1,6 +1,12 @@
 class S3Client {
-    constructor(baseUrl = 'http://localhost:9000') {
-        this.baseUrl = baseUrl;
+    constructor(baseUrl = null) {
+        if (baseUrl) {
+            this.baseUrl = baseUrl;
+        } else {
+            // Автоматическое определение протокола
+            this.baseUrl = window.location.protocol + '//' + 
+                          window.location.host;
+        }
         this.activeUploads = new Map();
     }
 
