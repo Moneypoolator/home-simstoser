@@ -6,13 +6,59 @@
 #include <fstream>
 #include <glog/logging.h>
 #include "logging.hpp"
+#include "authenticator.hpp"
 
 namespace json = nlohmann;
 
-request_handler::request_handler(file_manager& file_manager)
+request_handler::request_handler(file_manager& file_manager, authenticator* auth)
     : _file_manager(file_manager)
+    , _authenticator(auth)
 {
-    VLOG(1) << "Request handler initialized";
+    VLOG(1) << "Request handler initialized (auth: " 
+            << (_authenticator ? "enabled" : "disabled") << ")";
+}
+
+bool request_handler::authenticate_request(const http::request<http::string_body>& req) const
+{
+    if (!_auth_enabled || !_authenticator) {
+        VLOG(2) << "Authentication disabled, allowing request";
+        return true;
+    }
+    
+    // Собираем заголовки
+    auto headers = get_headers_map(req);
+    
+    // Проверяем подпись
+    bool authenticated = _authenticator->verify_signature(
+        std::string(req.method_string()),
+        std::string(req.target()),
+        headers,
+        req.body()
+    );
+    
+    if (!authenticated) {
+        LOG(WARNING) << "Authentication failed for request: " 
+                     << req.method_string() << " " << req.target();
+    }
+    
+    return authenticated;
+}
+
+// Добавим метод для преобразования заголовков
+std::map<std::string, std::string> request_handler::get_headers_map(
+    const http::request<http::string_body>& req) const
+{
+    std::map<std::string, std::string> headers;
+    
+    for (const auto& field : req.base()) {
+        // Преобразуем имя заголовка в нижний регистр
+        std::string name = std::string(field.name_string());
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        
+        headers[name] = std::string(field.value());
+    }
+    
+    return headers;
 }
 
 template<class body, class allocator>
@@ -174,6 +220,15 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
 
 http::response<http::string_body> request_handler::handle_get(const http::request<http::string_body>& req)
 {
+    // Проверяем аутентификацию
+    if (!authenticate_request(req)) {
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidSignature",
+            "Signature validation failed"
+        );
+	}
+	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -213,6 +268,14 @@ http::response<http::string_body> request_handler::handle_get(const http::reques
 
 http::response<http::string_body> request_handler::handle_put(const http::request<http::string_body>& req)
 {
+    if (!authenticate_request(req)) {
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidSignature",
+            "Signature validation failed"
+        );
+    }
+	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -260,6 +323,14 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
 
 http::response<http::string_body> request_handler::handle_delete(const http::request<http::string_body>& req)
 {
+    if (!authenticate_request(req)) {
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidSignature",
+            "Signature validation failed"
+        );
+    }
+	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -296,8 +367,16 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     return create_response(http::status::ok, response_json.dump());
 }
 
-http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& /*req*/)
+http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& req)
 {
+    if (!authenticate_request(req)) {
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidSignature",
+            "Signature validation failed"
+        );
+    }
+	
     auto files = _file_manager.list_files();
     
     json::json response_json;
@@ -370,6 +449,28 @@ http::response<http::string_body> request_handler::handle_initiate_upload(const 
     response_json["message"] = "Upload initiated successfully";
     
     return create_response(http::status::ok, response_json.dump());
+}
+
+// Добавим метод для создания ошибки в формате S3
+http::response<http::string_body> request_handler::create_error_response(
+    http::status status,
+    const std::string& code,
+    const std::string& message)
+{
+    // Формат ошибки S3
+    std::string error_xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>)" + code + R"(</Code>
+    <Message>)" + message + R"(</Message>
+    <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
+</Error>)";
+    
+    http::response<http::string_body> res{status, 11};
+    res.set(http::field::content_type, "application/xml");
+    res.set(http::field::access_control_allow_origin, "*");
+    res.body() = error_xml;
+    
+    return res;
 }
 
 http::response<http::string_body> request_handler::handle_upload_part(const http::request<http::string_body>& req)

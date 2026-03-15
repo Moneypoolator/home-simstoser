@@ -19,6 +19,7 @@ set(sources
     src/server.cpp
     src/file_manager.cpp
     src/request_handler.cpp
+    src/authenticator.cpp
 )
 
 # Заголовки
@@ -26,6 +27,7 @@ set(headers
     include/server.hpp
     include/file_manager.hpp
     include/request_handler.hpp
+    include/authenticator.hpp
 )
 
 # Executable

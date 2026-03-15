@@ -9,14 +9,28 @@
 s3_server::s3_server(const std::string& address, 
                      unsigned short port, 
                      const std::string& storage_path,
+                     const std::string& keys_file,
                      std::optional<ssl_config> ssl_cfg)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
+    , _keys_file(keys_file)
     , _acceptor(_io_context)
     , _ssl_config(std::move(ssl_cfg))
 {
     _ssl_enabled = _ssl_config.has_value();
+    
+    // Инициализируем аутентификатор, если указан файл ключей
+    if (!_keys_file.empty()) {
+        _authenticator = std::make_unique<authenticator>();
+        
+        if (_authenticator->load_keys(_keys_file)) {
+            _auth_enabled = true;
+            LOG(INFO) << "Authentication enabled with keys file: " << _keys_file;
+        } else {
+            LOG(WARNING) << "Failed to load access keys, authentication disabled";
+        }
+    }
     
     if (_ssl_enabled) {
         LOG(INFO) << "S3 server created with SSL: " << address << ":" << port;
@@ -229,7 +243,8 @@ void s3_server::handle_session(tcp::socket socket)
         
         // Создаем менеджер файлов и обработчик запросов
         file_manager fm(_storage_path);
-        request_handler handler(fm);
+        request_handler handler(fm, _authenticator.get());
+        handler.set_authentication_enabled(_auth_enabled);
         
         // Обрабатываем запрос
         handler.handle_request(

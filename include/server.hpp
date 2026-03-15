@@ -1,14 +1,16 @@
 #pragma once
 
 #include <string>
-#include <thread>
 #include <vector>
+#include <thread>
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/asio/ssl.hpp>
 #include "file_manager.hpp"
+#include "authenticator.hpp"
 
 namespace asio = boost::asio;
 namespace beast = boost::beast;
@@ -27,6 +29,7 @@ public:
     s3_server(const std::string& address, 
               unsigned short port, 
               const std::string& storage_path,
+              const std::string& keys_file = "",
               std::optional<ssl_config> ssl_cfg = std::nullopt);
     
     ~s3_server();
@@ -35,12 +38,13 @@ public:
     void stop();
     
     bool is_ssl_enabled() const { return _ssl_enabled; }
+    bool is_auth_enabled() const { return _auth_enabled; }
     
 private:
     std::string _address;
     unsigned short _port;
     std::string _storage_path;
-    
+    std::string _keys_file;
     asio::io_context _io_context;
     tcp::acceptor _acceptor;
     std::vector<std::thread> _threads;
@@ -48,6 +52,8 @@ private:
     
     std::optional<ssl_config> _ssl_config;
     bool _ssl_enabled = false;
+    bool _auth_enabled = false;
+    std::unique_ptr<authenticator> _authenticator;
     
     void do_accept();
     

@@ -77,3 +77,11 @@ curl -k https://localhost:9443/list
 
 # С указанием сертификата
 curl --cacert ./certs/server.crt https://localhost:9443/list
+
+
+# Запуск сервера с аутентификацией
+# Запуск с аутентификацией
+./s3_server --keys access_keys.csv --port 9000
+
+# Запуск с аутентификацией и HTTPS
+./s3_server --keys access_keys.csv --ssl --port 9443

@@ -61,6 +61,9 @@ int main(int argc, char* argv[])
     bool use_ssl = false;
     std::string cert_file = "./certs/server.crt";
     std::string key_file = "./certs/server.key";
+    // Добавим параметр для файла ключей
+	std::string keys_file = "";
+
     
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
@@ -83,7 +86,10 @@ int main(int argc, char* argv[])
         }
         else if (arg == "--key") {
             if (i + 1 < argc) key_file = argv[++i];
-        }        
+        }
+        else if (arg == "--keys" || arg == "-k") {
+            if (i + 1 < argc) keys_file = argv[++i];
+        }
         else if (arg == "--log-level" || arg == "-l") {
             if (i + 1 < argc) {
                 int vlevel = std::stoi(argv[++i]);
@@ -106,6 +112,7 @@ int main(int argc, char* argv[])
                       << "  -S, --ssl              Enable HTTPS/SSL (default: disabled)\n"
                       << "      --cert <file>      SSL certificate file (default: ./certs/server.crt)\n"
                       << "      --key <file>       SSL private key file (default: ./certs/server.key)\n"
+                      << "  -k, --keys <file>      Access keys file for authentication\n"                      
                       << "  -h, --help             Show this help message\n";
             logging::shutdown();
             return 0;
@@ -140,7 +147,7 @@ int main(int argc, char* argv[])
         }
         
         // Создаем и запускаем сервер
-        s3_server server(address, port, storage_path, ssl_cfg);
+        s3_server server(address, port, storage_path, keys_file, ssl_cfg);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;
