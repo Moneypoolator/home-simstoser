@@ -6,42 +6,149 @@
 #include <fstream>
 #include <glog/logging.h>
 #include "logging.hpp"
-#include "authenticator.hpp"
 
 namespace json = nlohmann;
 
-request_handler::request_handler(file_manager& file_manager, authenticator* auth)
+request_handler::request_handler(
+    file_manager& file_manager,
+    authenticator* auth,
+    authorizer* authorizer)
     : _file_manager(file_manager)
     , _authenticator(auth)
+    , _authorizer(authorizer)
 {
     VLOG(1) << "Request handler initialized (auth: " 
-            << (_authenticator ? "enabled" : "disabled") << ")";
+            << (_authenticator ? "enabled" : "disabled") 
+            << ", authorization: " 
+            << (_authorizer ? "enabled" : "disabled") << ")";
 }
 
-bool request_handler::authenticate_request(const http::request<http::string_body>& req) const
+// ========== АУТЕНТИФИКАЦИЯ ==========
+
+request_handler::auth_result request_handler::authenticate_request(
+    const http::request<http::string_body>& req) const
 {
     if (!_auth_enabled || !_authenticator) {
-        VLOG(2) << "Authentication disabled, allowing request";
-        return true;
+        VLOG(2) << "Authentication disabled, skipping";
+        return {false, std::nullopt, std::nullopt};
     }
     
     // Собираем заголовки
-    auto headers = get_headers_map(req);
+    std::map<std::string, std::string> headers;
+    for (const auto& field : req.base()) {
+        std::string name = std::string(field.name_string());
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        headers[name] = std::string(field.value());
+    }
     
-    // Проверяем подпись
-    bool authenticated = _authenticator->verify_signature(
+    // Проверяем подпись запроса
+    bool valid = _authenticator->verify_signature(
         std::string(req.method_string()),
         std::string(req.target()),
         headers,
         req.body()
     );
     
-    if (!authenticated) {
-        LOG(WARNING) << "Authentication failed for request: " 
+    if (!valid) {
+        LOG(WARNING) << "Authentication failed: " 
                      << req.method_string() << " " << req.target();
+        return {false, std::nullopt, std::nullopt};
     }
     
-    return authenticated;
+    // Извлекаем user_id из заголовка Authorization
+    auto auth_it = headers.find("authorization");
+    if (auth_it != headers.end()) {
+        // Парсим заголовок для извлечения access_key_id
+        std::string auth_header = auth_it->second;
+        
+        // Извлекаем access_key_id из заголовка Authorization
+        // Формат: AWS4-HMAC-SHA256 Credential=AKIA..., ...
+        size_t cred_pos = auth_header.find("Credential=");
+        if (cred_pos != std::string::npos) {
+            size_t start = cred_pos + 11;
+            size_t end = auth_header.find(',', start);
+            if (end == std::string::npos) end = auth_header.length();
+            
+            std::string cred_str = auth_header.substr(start, end - start);
+            size_t slash_pos = cred_str.find('/');
+            
+            if (slash_pos != std::string::npos) {
+                std::string access_key_id = cred_str.substr(0, slash_pos);
+                
+                // Получаем ключ доступа
+                auto access_key_opt = _authenticator->get_key(access_key_id);
+                if (access_key_opt) {
+                    VLOG(2) << "Authenticated with access key: " << access_key_id;
+                    return {true, access_key_id, access_key_opt->user_name};
+                }
+            }
+        }
+    }
+    
+    LOG(WARNING) << "Authentication successful but access key not found";
+    return {true, std::nullopt, std::nullopt};
+}
+
+// ========== АВТОРИЗАЦИЯ ==========
+
+bool request_handler::authorize_request(
+    const std::string& user_id,
+    const http::request<http::string_body>& req,
+    permission_type required_permission) const
+{
+    if (!_authorization_enabled || !_authorizer) {
+        VLOG(2) << "Authorization disabled, allowing request";
+        return true;
+    }
+    
+    // Извлекаем путь к ресурсу
+    std::string resource_path = extract_resource_path(req);
+    
+    // Проверяем доступ
+    bool authorized = _authorizer->check_access(
+        user_id,
+        resource_path,
+        required_permission
+    );
+    
+    if (!authorized) {
+        LOG(WARNING) << "Authorization failed for user " << user_id 
+                     << " to resource " << resource_path 
+                     << " (permission: " 
+                     << permission_to_string(required_permission) << ")";
+        return false;
+    }
+    
+    VLOG(2) << "Authorization successful for user " << user_id 
+            << " to resource " << resource_path;
+    return true;
+}
+
+// ========== ПУБЛИЧНЫЙ ДОСТУП ==========
+
+bool request_handler::check_public_access(
+    const http::request<http::string_body>& req,
+    permission_type required_permission) const
+{
+    if (!_authorizer) {
+        VLOG(2) << "Authorizer not available, public access disabled";
+        return false;
+    }
+    
+    // Извлекаем путь к ресурсу
+    std::string resource_path = extract_resource_path(req);
+    
+    // Проверяем публичный доступ
+    bool public_access = _authorizer->check_public_access(
+        resource_path,
+        required_permission
+    );
+    
+    if (public_access) {
+        VLOG(2) << "Public access granted to resource: " << resource_path;
+    }
+    
+    return public_access;
 }
 
 // Добавим метод для преобразования заголовков
@@ -61,12 +168,76 @@ std::map<std::string, std::string> request_handler::get_headers_map(
     return headers;
 }
 
+std::string request_handler::extract_resource_path(
+    const http::request<http::string_body>& req) const
+{
+    std::string path = std::string(req.target());
+    
+    // Удаляем query string
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) {
+        path = path.substr(0, query_pos);
+    }
+    
+    // Удаляем начальный слэш
+    if (!path.empty() && path[0] == '/') {
+        path = path.substr(1);
+    }
+    
+    // Для специальных эндпоинтов возвращаем пустой путь
+    if (path.find("upload/") != std::string::npos || path == "list") {
+        return "";
+    }
+    
+    return path;
+}
+
+std::optional<permission_type> request_handler::get_required_permission(
+    const http::request<http::string_body>& req) const
+{
+    std::string path = std::string(req.target());
+    
+    // Специальные эндпоинты не требуют разрешений
+    if (path.find("/upload/") != std::string::npos) {
+        return std::nullopt;
+    }
+    
+    // Определяем разрешение по методу
+    if (req.method() == http::verb::get) {
+        if (path == "/list") {
+            return permission_type::LIST;
+        }
+        return permission_type::READ;
+    }
+    else if (req.method() == http::verb::put) {
+        return permission_type::WRITE;
+    }
+    else if (req.method() == http::verb::delete_) {
+        return permission_type::DELETE;
+    }
+    
+    return std::nullopt;
+}
+
+std::string request_handler::permission_to_string(permission_type perm) {
+    switch (perm) {
+        case permission_type::READ: return "READ";
+        case permission_type::WRITE: return "WRITE";
+        case permission_type::DELETE: return "DELETE";
+        case permission_type::LIST: return "LIST";
+        case permission_type::MANAGE_ACL: return "MANAGE_ACL";
+        default: return "UNKNOWN";
+    }
+}
+
+// ========== ОСНОВНАЯ ОБРАБОТКА ЗАПРОСОВ ==========
+
 template<class body, class allocator>
 void request_handler::handle_request(
     http::request<body, http::basic_fields<allocator>>&& req,
     std::function<void(http::response<http::string_body>)> send)
 {
-    std::cout << "[" << req.method_string() << "] " << req.target() << std::endl;
+    VLOG(1) << "Handling request: " << req.method_string() << " " << req.target();
     
     http::response<http::string_body> response;
     
@@ -89,11 +260,10 @@ void request_handler::handle_request(
     std::string path = std::string(req.target());
     
     // Обслуживание статических файлов веб-интерфейса
-    if (path.find("/upload/") == std::string::npos && 
-        path != "/list" && 
+    if (path.find("/upload/") == std::string::npos &&
+        path != "/list" &&
         req.method() == http::verb::get) {
-        
-        // Если это не API endpoint, возвращаем статический файл
+
         if (path.find("/upload/") == std::string::npos) {
             response = handle_static_file(path);
             response.prepare_payload();
@@ -102,38 +272,96 @@ void request_handler::handle_request(
         }
     }
     
-    // API endpoints
-    if (path.find("/upload/initiate") != std::string::npos && req.method() == http::verb::post) {
-        response = handle_initiate_upload(req);
+    // Определяем требуемое разрешение для запроса
+    auto required_perm = get_required_permission(req);
+    
+    // === ЭТАП 1: АУТЕНТИФИКАЦИЯ ===
+    auth_result auth_result = authenticate_request(req);
+    
+    // === ЭТАП 2: АВТОРИЗАЦИЯ или ПУБЛИЧНЫЙ ДОСТУП ===
+    bool access_granted = false;
+    std::string user_context = "anonymous";
+    
+    if (auth_result.authenticated && auth_result.user_id) {
+        // Аутентификация успешна, проверяем авторизацию
+        if (!required_perm || authorize_request(*auth_result.user_id, req, *required_perm)) {
+            access_granted = true;
+            user_context = auth_result.username.value_or(*auth_result.user_id);
+            VLOG(2) << "Access granted to authenticated user: " << user_context;
+        } else {
+            // Авторизация не пройдена
+            response = create_error_response(
+                http::status::forbidden,
+                "AccessDenied",
+                "Access denied"
+            );
+        }
+    } else if (required_perm) {
+        // Аутентификация неуспешна, проверяем публичный доступ
+        if (check_public_access(req, *required_perm)) {
+            access_granted = true;
+            VLOG(2) << "Access granted via public access";
+        } else {
+            // Публичный доступ запрещен
+            response = create_error_response(
+                http::status::unauthorized,
+                "InvalidSignature",
+                "Signature validation failed"
+            );
+        }
+    } else {
+        // Запрос не требует аутентификации (например, multipart upload)
+        access_granted = true;
     }
-    else if (path.find("/upload/part") != std::string::npos && req.method() == http::verb::put) {
-        response = handle_upload_part(req);
+    
+    // Если доступ не разрешен, отправляем ответ с ошибкой
+    if (!access_granted) {
+        response.prepare_payload();
+        send(std::move(response));
+        return;
     }
-    else if (path.find("/upload/complete") != std::string::npos && req.method() == http::verb::post) {
-        response = handle_complete_upload(req);
-    }
-    else if (path.find("/upload/abort") != std::string::npos && req.method() == http::verb::delete_) {
-        response = handle_abort_upload(req);
-    }
-    else if (path.find("/upload/progress") != std::string::npos && req.method() == http::verb::get) {
-        response = handle_get_progress(req);
-    }
-    else if (path == "/list" && req.method() == http::verb::get) {
-        response = handle_list(req);
-    }
-    else if (req.method() == http::verb::get) {
-        response = handle_get(req);
-    }
-    else if (req.method() == http::verb::put) {
-        response = handle_put(req);
-    }
-    else if (req.method() == http::verb::delete_) {
-        response = handle_delete(req);
-    }
-    else {
-        response = create_response(
-            http::status::method_not_allowed,
-            R"({"error": "Method not allowed"})"
+    
+    // === ЭТАП 3: ОБРАБОТКА ЗАПРОСА ===
+    try {
+        if (path.find("/upload/initiate") != std::string::npos && req.method() == http::verb::post) {
+            response = handle_initiate_upload(req);
+        }
+        else if (path.find("/upload/part") != std::string::npos && req.method() == http::verb::put) {
+            response = handle_upload_part(req);
+        }
+        else if (path.find("/upload/complete") != std::string::npos && req.method() == http::verb::post) {
+            response = handle_complete_upload(req);
+        }
+        else if (path.find("/upload/abort") != std::string::npos && req.method() == http::verb::delete_) {
+            response = handle_abort_upload(req);
+        }
+        else if (path.find("/upload/progress") != std::string::npos && req.method() == http::verb::get) {
+            response = handle_get_progress(req);
+        }
+        else if (path == "/list" && req.method() == http::verb::get) {
+            response = handle_list(req);
+        }
+        else if (req.method() == http::verb::get) {
+            response = handle_get(req);
+        }
+        else if (req.method() == http::verb::put) {
+            response = handle_put(req);
+        }
+        else if (req.method() == http::verb::delete_) {
+            response = handle_delete(req);
+        }
+        else {
+            response = create_response(
+                http::status::method_not_allowed,
+                R"({"error": "Method not allowed"})"
+            );
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception handling request: " << e.what();
+        response = create_error_response(
+            http::status::internal_server_error,
+            "InternalError",
+            "Internal server error"
         );
     }
     
@@ -147,88 +375,9 @@ template void request_handler::handle_request<http::string_body, std::allocator<
     std::function<void(http::response<http::string_body>)>
 );
 
-http::response<http::string_body> request_handler::handle_static_file(const std::string& path)
-{
-    std::string filename = path;
-    
-    // Если запрашивается корень, возвращаем index.html
-    if (filename == "/" || filename.empty()) {
-        filename = "/index.html";
-    }
-    
-    // Убираем начальный слэш
-    if (!filename.empty() && filename[0] == '/') {
-        filename = filename.substr(1);
-    }
-    
-    VLOG(1) << "Serving static file: " << filename;
-    
-    // Определяем MIME тип по расширению
-    auto get_mime_type = [](const std::string& fname) -> std::string {
-        size_t dot_pos = fname.find_last_of('.');
-        if (dot_pos == std::string::npos) {
-            return "application/octet-stream";
-        }
-        
-        std::string ext = fname.substr(dot_pos + 1);
-        if (ext == "html" || ext == "htm") return "text/html";
-        if (ext == "css") return "text/css";
-        if (ext == "js") return "application/javascript";
-        if (ext == "json") return "application/json";
-        if (ext == "png") return "image/png";
-        if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
-        if (ext == "gif") return "image/gif";
-        if (ext == "svg") return "image/svg+xml";
-        if (ext == "ico") return "image/x-icon";
-        
-        return "application/octet-stream";
-    };
-    
-    // Путь к веб-файлам (относительно исполняемого файла)
-    fs::path web_dir = fs::current_path() / "web";
-    fs::path file_path = web_dir / filename;
-    
-    // Проверяем безопасность пути
-    if (!file_manager::is_path_safe(web_dir, filename)) {
-        LOG(WARNING) << "Unsafe static file path access attempt: " << filename;
-        return create_response(http::status::forbidden, "Access denied");
-    }
-    
-    // Читаем файл
-    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        VLOG(1) << "Static file not found: " << filename;
-        return create_response(http::status::not_found, "File not found");
-    }
-    
-    auto file_size = file.tellg();
-    std::vector<char> file_data(file_size);
-    
-    file.seekg(0, std::ios::beg);
-    file.read(file_data.data(), file_size);
-    file.close();
-    
-    VLOG(1) << "Static file served: " << filename << " (" << file_size << " bytes)";
-    
-    http::response<http::string_body> res{http::status::ok, 11};
-    res.set(http::field::content_type, get_mime_type(filename));
-    res.set(http::field::content_length, std::to_string(file_size));
-    res.body() = std::string(file_data.begin(), file_data.end());
-    
-    return res;
-}
 
 http::response<http::string_body> request_handler::handle_get(const http::request<http::string_body>& req)
 {
-    // Проверяем аутентификацию
-    if (!authenticate_request(req)) {
-        return create_error_response(
-            http::status::unauthorized,
-            "InvalidSignature",
-            "Signature validation failed"
-        );
-	}
-	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -268,14 +417,6 @@ http::response<http::string_body> request_handler::handle_get(const http::reques
 
 http::response<http::string_body> request_handler::handle_put(const http::request<http::string_body>& req)
 {
-    if (!authenticate_request(req)) {
-        return create_error_response(
-            http::status::unauthorized,
-            "InvalidSignature",
-            "Signature validation failed"
-        );
-    }
-	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -316,21 +457,13 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
         response_json["etag"] = metadata->etag;
     }
     
-    LOG(INFO) << "File uploaded successfully: " << filename << " (" 
+    LOG(INFO) << "File uploaded successfully: " << filename << " ("
               << std::to_string(data.size()) << " bytes)";
     return create_response(http::status::created, response_json.dump());
 }
 
 http::response<http::string_body> request_handler::handle_delete(const http::request<http::string_body>& req)
 {
-    if (!authenticate_request(req)) {
-        return create_error_response(
-            http::status::unauthorized,
-            "InvalidSignature",
-            "Signature validation failed"
-        );
-    }
-	
     std::string filename = get_filename_from_path(std::string(req.target()));
     
     if (filename.empty()) {
@@ -367,16 +500,8 @@ http::response<http::string_body> request_handler::handle_delete(const http::req
     return create_response(http::status::ok, response_json.dump());
 }
 
-http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& req)
+http::response<http::string_body> request_handler::handle_list(const http::request<http::string_body>& /*req*/)
 {
-    if (!authenticate_request(req)) {
-        return create_error_response(
-            http::status::unauthorized,
-            "InvalidSignature",
-            "Signature validation failed"
-        );
-    }
-	
     auto files = _file_manager.list_files();
     
     json::json response_json;
@@ -451,27 +576,78 @@ http::response<http::string_body> request_handler::handle_initiate_upload(const 
     return create_response(http::status::ok, response_json.dump());
 }
 
-// Добавим метод для создания ошибки в формате S3
-http::response<http::string_body> request_handler::create_error_response(
-    http::status status,
-    const std::string& code,
-    const std::string& message)
+
+http::response<http::string_body> request_handler::handle_static_file(const std::string& path)
 {
-    // Формат ошибки S3
-    std::string error_xml = R"(<?xml version="1.0" encoding="UTF-8"?>
-<Error>
-    <Code>)" + code + R"(</Code>
-    <Message>)" + message + R"(</Message>
-    <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
-</Error>)";
+    std::string filename = path;
     
-    http::response<http::string_body> res{status, 11};
-    res.set(http::field::content_type, "application/xml");
-    res.set(http::field::access_control_allow_origin, "*");
-    res.body() = error_xml;
+    // Если запрашивается корень, возвращаем index.html
+    if (filename == "/" || filename.empty()) {
+        filename = "/index.html";
+    }
+    
+    // Убираем начальный слэш
+    if (!filename.empty() && filename[0] == '/') {
+        filename = filename.substr(1);
+    }
+    
+    VLOG(1) << "Serving static file: " << filename;
+    
+    // Определяем MIME тип по расширению
+    auto get_mime_type = [](const std::string& fname) -> std::string {
+        size_t dot_pos = fname.find_last_of('.');
+        if (dot_pos == std::string::npos) {
+            return "application/octet-stream";
+        }
+        
+        std::string ext = fname.substr(dot_pos + 1);
+        if (ext == "html" || ext == "htm") return "text/html";
+        if (ext == "css") return "text/css";
+        if (ext == "js") return "application/javascript";
+        if (ext == "json") return "application/json";
+        if (ext == "png") return "image/png";
+        if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
+        if (ext == "gif") return "image/gif";
+        if (ext == "svg") return "image/svg+xml";
+        if (ext == "ico") return "image/x-icon";
+        
+        return "application/octet-stream";
+    };
+    
+    // Путь к веб-файлам (относительно исполняемого файла)
+    fs::path web_dir = fs::current_path() / "web";
+    fs::path file_path = web_dir / filename;
+    
+    // Проверяем безопасность пути
+    if (!file_manager::is_path_safe(web_dir, filename)) {
+        LOG(WARNING) << "Unsafe static file path access attempt: " << filename;
+        return create_response(http::status::forbidden, "Access denied");
+    }
+    
+    // Читаем файл
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        VLOG(1) << "Static file not found: " << filename;
+        return create_response(http::status::not_found, "File not found");
+    }
+    
+    auto file_size = file.tellg();
+    std::vector<char> file_data(file_size);
+    
+    file.seekg(0, std::ios::beg);
+    file.read(file_data.data(), file_size);
+    file.close();
+    
+    VLOG(1) << "Static file served: " << filename << " (" << file_size << " bytes)";
+    
+    http::response<http::string_body> res{http::status::ok, 11};
+    res.set(http::field::content_type, get_mime_type(filename));
+    res.set(http::field::content_length, std::to_string(file_size));
+    res.body() = std::string(file_data.begin(), file_data.end());
     
     return res;
 }
+
 
 http::response<http::string_body> request_handler::handle_upload_part(const http::request<http::string_body>& req)
 {
@@ -698,6 +874,28 @@ http::response<http::string_body> request_handler::create_response(
     VLOG(2) << "Creating response: status=" << static_cast<int>(status) 
             << ", content_type=" << content_type 
             << ", body_size=" << body.size();
+    
+    return res;
+}
+
+// Добавим метод для создания ошибки в формате S3
+http::response<http::string_body> request_handler::create_error_response(
+    http::status status,
+    const std::string& code,
+    const std::string& message)
+{
+    // Формат ошибки S3
+    std::string error_xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>)" + code + R"(</Code>
+    <Message>)" + message + R"(</Message>
+    <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
+</Error>)";
+    
+    http::response<http::string_body> res{status, 11};
+    res.set(http::field::content_type, "application/xml");
+    res.set(http::field::access_control_allow_origin, "*");
+    res.body() = error_xml;
     
     return res;
 }

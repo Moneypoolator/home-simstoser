@@ -4,16 +4,31 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <optional>
 #include <boost/beast.hpp>
 #include "file_manager.hpp"
 #include "authenticator.hpp"
+#include "authorizer.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
 
+// Типы разрешений для авторизации
+// enum class permission_type {
+//     READ,
+//     WRITE,
+//     DELETE,
+//     LIST,
+//     MANAGE_ACL
+// };
+
 class request_handler {
 public:
-    explicit request_handler(file_manager& file_manager, authenticator* auth = nullptr);
+    explicit request_handler(
+        file_manager& file_manager,
+        authenticator* auth = nullptr,
+        authorizer* authorizer = nullptr
+    );
     
     template<class body, class allocator>
     void handle_request(
@@ -21,16 +36,49 @@ public:
         std::function<void(http::response<http::string_body>)> send
     );
     
-    // Включение/выключение аутентификации
-    void set_authentication_enabled(bool enabled) { _auth_enabled = enabled; }
+    // Включение/выключение проверок
+    void set_auth_enabled(bool enabled) { _auth_enabled = enabled; }
+    void set_authorization_enabled(bool enabled) { _authorization_enabled = enabled; }
     
 private:
     file_manager& _file_manager;
     authenticator* _authenticator;
+    authorizer* _authorizer;
     bool _auth_enabled = false;
+    bool _authorization_enabled = false;
     
-    // Проверка аутентификации
-    bool authenticate_request(const http::request<http::string_body>& req) const;
+    // === Аутентификация: проверка подписи запроса ===
+    struct auth_result {
+        bool authenticated;
+        std::optional<std::string> user_id;
+        std::optional<std::string> username;
+    };
+    
+    auth_result authenticate_request(const http::request<http::string_body>& req) const;
+    
+    // === Авторизация: проверка прав доступа ===
+    bool authorize_request(
+        const std::string& user_id,
+        const http::request<http::string_body>& req,
+        permission_type required_permission
+    ) const;
+    
+    // === Публичный доступ ===
+    bool check_public_access(
+        const http::request<http::string_body>& req,
+        permission_type required_permission
+    ) const;
+    
+    // Извлечение пути к ресурсу из запроса
+    std::string extract_resource_path(const http::request<http::string_body>& req) const;
+    
+    // Определение требуемого разрешения для запроса
+    std::optional<permission_type> get_required_permission(
+        const http::request<http::string_body>& req
+    ) const;
+    
+    // Преобразование permission_type в строку
+    static std::string permission_to_string(permission_type perm);
     
     // Обработчики для разных методов
     http::response<http::string_body> handle_get(const http::request<http::string_body>& req);

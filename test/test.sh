@@ -79,9 +79,27 @@ curl -k https://localhost:9443/list
 curl --cacert ./certs/server.crt https://localhost:9443/list
 
 
-# Запуск сервера с аутентификацией
+# Запуск сервера с аутентификацией:
 # Запуск с аутентификацией
 ./s3_server --keys access_keys.csv --port 9000
 
 # Запуск с аутентификацией и HTTPS
 ./s3_server --keys access_keys.csv --ssl --port 9443
+
+
+# Запуск с полной защитой:
+
+# Создаем файл ключей
+echo "AKIA1234567890ABCDEF,secret_key_12345,user1,1" > access_keys.csv
+
+# Создаем файл пользователей (опционально)
+echo "user1,admin@example.com,ADMIN" > users.csv
+
+# Запускаем сервер с аутентификацией, авторизацией и HTTPS
+./s3_server --keys access_keys.csv --users users.csv --ssl --port 9443
+
+# Без аутентификации и авторизации - все файлы публичные
+./s3_server --port 9000
+
+# Аутентификация включена, но некоторые файлы публичные
+./s3_server --keys access_keys.csv --port 9000

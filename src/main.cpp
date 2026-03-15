@@ -58,12 +58,11 @@ int main(int argc, char* argv[])
     std::string address = "0.0.0.0";
     unsigned short port = 9000;
     std::string storage_path = "./storage";
+    std::string keys_file = "";
+    std::string users_file = "";
     bool use_ssl = false;
     std::string cert_file = "./certs/server.crt";
     std::string key_file = "./certs/server.key";
-    // Добавим параметр для файла ключей
-	std::string keys_file = "";
-
     
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
@@ -78,6 +77,12 @@ int main(int argc, char* argv[])
         else if (arg == "--storage" || arg == "-s") {
             if (i + 1 < argc) storage_path = argv[++i];
         }
+        else if (arg == "--keys" || arg == "-k") {
+            if (i + 1 < argc) keys_file = argv[++i];
+        }
+        else if (arg == "--users" || arg == "-u") {
+            if (i + 1 < argc) users_file = argv[++i];
+        }
         else if (arg == "--ssl" || arg == "-S") {
             use_ssl = true;
         }
@@ -86,9 +91,6 @@ int main(int argc, char* argv[])
         }
         else if (arg == "--key") {
             if (i + 1 < argc) key_file = argv[++i];
-        }
-        else if (arg == "--keys" || arg == "-k") {
-            if (i + 1 < argc) keys_file = argv[++i];
         }
         else if (arg == "--log-level" || arg == "-l") {
             if (i + 1 < argc) {
@@ -107,12 +109,11 @@ int main(int argc, char* argv[])
                       << "  -a, --address <addr>   Bind address (default: 0.0.0.0)\n"
                       << "  -p, --port <port>      Port number (default: 9000)\n"
                       << "  -s, --storage <path>   Storage directory (default: ./storage)\n"
-                      << "  -l, --log-level <lvl>  Verbosity level: 0-3 (default: 0)\n"
-                      << "      --log-dir <path>   Log directory (default: ./logs)\n"
-                      << "  -S, --ssl              Enable HTTPS/SSL (default: disabled)\n"
-                      << "      --cert <file>      SSL certificate file (default: ./certs/server.crt)\n"
-                      << "      --key <file>       SSL private key file (default: ./certs/server.key)\n"
-                      << "  -k, --keys <file>      Access keys file for authentication\n"                      
+                      << "  -k, --keys <file>      Access keys file for authentication\n"
+                      << "  -u, --users <file>     Users file for authorization\n"
+                      << "  -S, --ssl              Enable HTTPS/SSL\n"
+                      << "      --cert <file>      SSL certificate file\n"
+                      << "      --key <file>       SSL private key file\n"
                       << "  -h, --help             Show this help message\n";
             logging::shutdown();
             return 0;
@@ -146,8 +147,7 @@ int main(int argc, char* argv[])
             };
         }
         
-        // Создаем и запускаем сервер
-        s3_server server(address, port, storage_path, keys_file, ssl_cfg);
+        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;
@@ -155,6 +155,12 @@ int main(int argc, char* argv[])
         std::cout << "Protocol: " << (use_ssl ? "HTTPS (SSL/TLS)" : "HTTP") << std::endl;
         std::cout << "Address: " << address << ":" << port << std::endl;
         std::cout << "Storage: " << storage_path << std::endl;
+        if (!keys_file.empty()) {
+            std::cout << "Authentication: ENABLED (keys: " << keys_file << ")" << std::endl;
+        }
+        if (!users_file.empty()) {
+            std::cout << "Authorization: ENABLED (users: " << users_file << ")" << std::endl;
+        }
         if (use_ssl) {
             std::cout << "Certificate: " << cert_file << std::endl;
         }

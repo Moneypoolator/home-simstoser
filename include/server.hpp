@@ -11,6 +11,7 @@
 #include <boost/asio/ssl.hpp>
 #include "file_manager.hpp"
 #include "authenticator.hpp"
+#include "authorizer.hpp"
 
 namespace asio = boost::asio;
 namespace beast = boost::beast;
@@ -30,6 +31,7 @@ public:
               unsigned short port, 
               const std::string& storage_path,
               const std::string& keys_file = "",
+              const std::string& users_file = "",
               std::optional<ssl_config> ssl_cfg = std::nullopt);
     
     ~s3_server();
@@ -45,6 +47,7 @@ private:
     unsigned short _port;
     std::string _storage_path;
     std::string _keys_file;
+    std::string _users_file;
     asio::io_context _io_context;
     tcp::acceptor _acceptor;
     std::vector<std::thread> _threads;
@@ -53,16 +56,12 @@ private:
     std::optional<ssl_config> _ssl_config;
     bool _ssl_enabled = false;
     bool _auth_enabled = false;
+    bool _authorization_enabled = false;
     std::unique_ptr<authenticator> _authenticator;
+    std::unique_ptr<authorizer> _authorizer;
     
     void do_accept();
-    
-    // Обработка обычных (HTTP) соединений
     void handle_session(tcp::socket socket);
-    
-    // Обработка зашифрованных (HTTPS) соединений
-    void handle_ssl_session(ssl::stream<tcp::socket> socket);
-    
-    // Настройка SSL контекста
-    std::shared_ptr<ssl::context> setup_ssl_context();
+    void handle_ssl_session(asio::ssl::stream<tcp::socket> socket);
+    std::shared_ptr<asio::ssl::context> setup_ssl_context();
 };

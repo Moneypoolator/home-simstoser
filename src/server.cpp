@@ -10,11 +10,13 @@ s3_server::s3_server(const std::string& address,
                      unsigned short port, 
                      const std::string& storage_path,
                      const std::string& keys_file,
+                     const std::string& users_file,
                      std::optional<ssl_config> ssl_cfg)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
     , _keys_file(keys_file)
+    , _users_file(users_file)
     , _acceptor(_io_context)
     , _ssl_config(std::move(ssl_cfg))
 {
@@ -30,6 +32,15 @@ s3_server::s3_server(const std::string& address,
         } else {
             LOG(WARNING) << "Failed to load access keys, authentication disabled";
         }
+    }
+    
+    // Инициализируем авторизатор, если указан файл пользователей
+    if (!_users_file.empty()) {
+        _authorizer = std::make_unique<authorizer>();
+        _authorization_enabled = true;
+        LOG(INFO) << "Authorization enabled with users file: " << _users_file;
+        
+        // TODO: Загрузка пользователей из файла
     }
     
     if (_ssl_enabled) {
@@ -218,7 +229,7 @@ void s3_server::handle_session(tcp::socket socket)
         if (!ec) {
             client_info = remote_endpoint.address().to_string() +
                          ":" + std::to_string(remote_endpoint.port());
-            VLOG(2) << "Handling HTTP session from " << client_info;
+            VLOG(2) << "Handling session from " << client_info;
         }
         
         // Создаем объекты для чтения/записи
@@ -234,7 +245,6 @@ void s3_server::handle_session(tcp::socket socket)
             return;
         }
         
-        // ЯВНОЕ ПРЕОБРАЗОВАНИЕ string_view В string
         logging::log_request(
             std::string(req.method_string()),
             std::string(req.target()),
@@ -243,8 +253,9 @@ void s3_server::handle_session(tcp::socket socket)
         
         // Создаем менеджер файлов и обработчик запросов
         file_manager fm(_storage_path);
-        request_handler handler(fm, _authenticator.get());
-        handler.set_authentication_enabled(_auth_enabled);
+        request_handler handler(fm, _authenticator.get(), _authorizer.get());
+        handler.set_auth_enabled(_auth_enabled);
+        handler.set_authorization_enabled(_authorization_enabled);
         
         // Обрабатываем запрос
         handler.handle_request(
@@ -263,8 +274,6 @@ void s3_server::handle_session(tcp::socket socket)
                         std::chrono::steady_clock::now() - start_time
                     );
                     VLOG(1) << "Request handled in " << duration.count() << "ms";
-                    
-                    // Логируем ответ
                     logging::log_response(static_cast<int>(res.result()));
                 }
                 
