@@ -118,6 +118,7 @@ bool file_manager::delete_file(const std::string& filename)
         
         return fs::remove(file_path);
     } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during file deletion: " << e.what();
         return false;
     }
 }
@@ -128,6 +129,7 @@ std::vector<file_metadata> file_manager::list_files()
     
     try {
         if (!fs::exists(_storage_dir) || !fs::is_directory(_storage_dir)) {
+            LOG(WARNING) << "Storage directory not found: " << _storage_dir.string();
             return result;
         }
         
@@ -142,8 +144,10 @@ std::vector<file_metadata> file_manager::list_files()
                 result.push_back(meta);
             }
         }
+        
+        VLOG(1) << "Listed " << result.size() << " files";
     } catch (const std::exception& e) {
-        // В случае ошибки возвращаем пустой список
+        LOG(ERROR) << "Exception during file listing: " << e.what();
         result.clear();
     }
     
@@ -153,13 +157,23 @@ std::vector<file_metadata> file_manager::list_files()
 bool file_manager::file_exists(const std::string& filename) const
 {
     if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
         return false;
     }
 
     try {
         fs::path file_path = _storage_dir / filename;
-        return fs::exists(file_path) && fs::is_regular_file(file_path);
+        bool exists = fs::exists(file_path) && fs::is_regular_file(file_path);
+        
+        if (!exists) {
+            VLOG(2) << "File existence check: " << filename << " - not found";
+        } else {
+            VLOG(2) << "File existence check: " << filename << " - exists";
+        }
+        
+        return exists;
     } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception checking file existence: " << filename << " - " << e.what();
         return false;
     }
 }
@@ -167,6 +181,7 @@ bool file_manager::file_exists(const std::string& filename) const
 std::optional<file_metadata> file_manager::get_metadata(const std::string& filename) const
 {
     if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
         return std::nullopt;
     }
 
@@ -174,6 +189,7 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
         fs::path file_path = _storage_dir / filename;
         
         if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
+            VLOG(2) << "Metadata request: file not found - " << filename;
             return std::nullopt;
         }
         
@@ -183,8 +199,11 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
         meta.last_modified = fs::last_write_time(file_path);
         meta.etag = compute_etag(file_path);
         
+        VLOG(2) << "Metadata retrieved for: " << filename << " (" << meta.size << " bytes)";
+        
         return meta;
     } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception getting metadata: " << filename << " - " << e.what();
         return std::nullopt;
     }
 }
@@ -192,6 +211,7 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
 std::optional<std::string> file_manager::initiate_multipart_upload(const std::string& filename)
 {
     if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
         return std::nullopt;
     }
 
@@ -214,6 +234,8 @@ std::optional<std::string> file_manager::initiate_multipart_upload(const std::st
     
     _active_uploads[upload_id] = std::move(upload);
     
+    LOG(INFO) << "Multipart upload initiated: " << filename << " (ID: " << upload_id << ")";
+    
     return upload_id;
 }
 
@@ -223,6 +245,8 @@ bool file_manager::upload_part(
     const std::vector<char>& data)
 {
     if (data.empty() || part_number <= 0) {
+        LOG(WARNING) << "Invalid part upload parameters: upload_id=" << upload_id 
+                     << ", part=" << part_number << ", size=" << data.size();
         return false;
     }
 
@@ -230,6 +254,7 @@ bool file_manager::upload_part(
     
     auto upload_opt = get_upload(upload_id);
     if (!upload_opt || (*upload_opt)->completed) {
+        LOG(WARNING) << "Upload not found or already completed: " << upload_id;
         return false;
     }
     
@@ -246,6 +271,7 @@ bool file_manager::upload_part(
     // Сохраняем часть
     std::ofstream part_file(part_path, std::ios::binary | std::ios::trunc);
     if (!part_file) {
+        LOG(ERROR) << "Failed to open part file for writing: " << part_path.string();
         return false;
     }
     
@@ -253,6 +279,7 @@ bool file_manager::upload_part(
     part_file.close();
     
     if (!part_file.good()) {
+        LOG(ERROR) << "Failed to write part file: " << part_path.string();
         return false;
     }
     
@@ -260,6 +287,9 @@ bool file_manager::upload_part(
     if (std::find(upload->parts.begin(), upload->parts.end(), part_filename) == upload->parts.end()) {
         upload->parts.push_back(part_filename);
     }
+    
+    LOG(INFO) << "Part uploaded: upload_id=" << upload_id 
+              << ", part=" << part_number << ", size=" << data.size() << " bytes";
     
     return true;
 }
@@ -270,6 +300,7 @@ std::optional<std::map<int, std::uintmax_t>> file_manager::get_upload_progress(c
     
     auto upload_opt = get_upload(upload_id);
     if (!upload_opt) {
+        VLOG(1) << "Progress requested for non-existent upload: " << upload_id;
         return std::nullopt;
     }
     
@@ -291,6 +322,9 @@ std::optional<std::map<int, std::uintmax_t>> file_manager::get_upload_progress(c
         }
     }
     
+    VLOG(1) << "Upload progress retrieved: upload_id=" << upload_id 
+            << ", parts=" << progress.size();
+    
     return progress;
 }
 
@@ -299,6 +333,7 @@ bool file_manager::complete_multipart_upload(
     const std::vector<int>& part_numbers)
 {
     if (part_numbers.empty()) {
+        LOG(WARNING) << "Empty part numbers list for upload completion: " << upload_id;
         return false;
     }
 
@@ -306,6 +341,7 @@ bool file_manager::complete_multipart_upload(
     
     auto upload_opt = get_upload(upload_id);
     if (!upload_opt || (*upload_opt)->completed) {
+        LOG(WARNING) << "Upload not found or already completed: " << upload_id;
         return false;
     }
     
@@ -313,6 +349,7 @@ bool file_manager::complete_multipart_upload(
     
     // Объединяем части
     if (!merge_parts(*upload, part_numbers)) {
+        LOG(ERROR) << "Failed to merge parts for upload: " << upload_id;
         return false;
     }
     
@@ -321,6 +358,9 @@ bool file_manager::complete_multipart_upload(
     
     // Очищаем временные файлы
     cleanup_upload(upload_id);
+    
+    LOG(INFO) << "Multipart upload completed: " << upload_id 
+              << " (" << upload->filename << ")";
     
     return true;
 }
@@ -331,11 +371,14 @@ bool file_manager::abort_multipart_upload(const std::string& upload_id)
     
     auto upload_opt = get_upload(upload_id);
     if (!upload_opt) {
+        VLOG(1) << "Attempted to abort non-existent upload: " << upload_id;
         return false;
     }
     
     // Удаляем временные файлы
     cleanup_upload(upload_id);
+    
+    LOG(INFO) << "Multipart upload aborted: " << upload_id;
     
     return true;
 }
@@ -360,19 +403,10 @@ void file_manager::cleanup_old_uploads(std::chrono::hours max_age)
         cleanup_upload(upload_id);
         _active_uploads.erase(upload_id);
     }
-}
-
-std::string file_manager::compute_etag_MD5(const std::vector<char>& data) const
-{
-    unsigned char digest[MD5_DIGEST_LENGTH];
-    MD5(reinterpret_cast<const unsigned char*>(data.data()), data.size(), digest);
     
-    std::stringstream ss;
-    for (int i = 0; i < MD5_DIGEST_LENGTH; ++i) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
-    }
-    
-    return ss.str();
+    if (!uploads_to_remove.empty()) {
+	    LOG(INFO) << "Cleaned up " << uploads_to_remove.size() << " old uploads";
+	}
 }
 
 std::string file_manager::compute_etag_SHA256(const std::vector<char>& data) const
@@ -520,6 +554,7 @@ bool file_manager::merge_parts(const multipart_upload& upload, const std::vector
         // Открываем файл для записи
         std::ofstream final_file(final_path, std::ios::binary | std::ios::trunc);
         if (!final_file) {
+            LOG(ERROR) << "Failed to open final file for writing: " << final_path.string();
             return false;
         }
         
@@ -531,6 +566,7 @@ bool file_manager::merge_parts(const multipart_upload& upload, const std::vector
             fs::path part_path = upload.temp_dir / part_name.str();
             
             if (!fs::exists(part_path)) {
+                LOG(ERROR) << "Part file not found: " << part_path.string();
                 final_file.close();
                 return false;
             }
@@ -538,6 +574,7 @@ bool file_manager::merge_parts(const multipart_upload& upload, const std::vector
             // Читаем часть
             std::ifstream part_file(part_path, std::ios::binary | std::ios::ate);
             if (!part_file) {
+                LOG(ERROR) << "Failed to open part file: " << part_path.string();
                 final_file.close();
                 return false;
             }
@@ -555,8 +592,16 @@ bool file_manager::merge_parts(const multipart_upload& upload, const std::vector
         
         final_file.close();
         
-        return final_file.good();
+        if (final_file.good()) {
+            LOG(INFO) << "Parts merged successfully: " << upload.filename 
+                      << " (" << part_numbers.size() << " parts)";
+            return true;
+        } else {
+            LOG(ERROR) << "Failed to write final file: " << upload.filename;
+            return false;
+        }
     } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during parts merging: " << e.what();
         return false;
     }
 }
@@ -565,6 +610,7 @@ void file_manager::cleanup_upload(const std::string& upload_id)
 {
     auto upload_opt = get_upload(upload_id);
     if (!upload_opt) {
+        VLOG(2) << "Cleanup requested for non-existent upload: " << upload_id;
         return;
     }
     
@@ -574,9 +620,10 @@ void file_manager::cleanup_upload(const std::string& upload_id)
     try {
         if (fs::exists(upload->temp_dir)) {
             fs::remove_all(upload->temp_dir);
+            VLOG(2) << "Upload cleanup completed: " << upload_id;
         }
-    } catch (...) {
-        // Игнорируем ошибки при удалении
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during upload cleanup: " << upload_id << " - " << e.what();
     }
     
     // Удаляем из активных загрузок

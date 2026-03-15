@@ -115,6 +115,8 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
         filename = filename.substr(1);
     }
     
+    VLOG(1) << "Serving static file: " << filename;
+    
     // Определяем MIME тип по расширению
     auto get_mime_type = [](const std::string& fname) -> std::string {
         size_t dot_pos = fname.find_last_of('.');
@@ -142,12 +144,14 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
     
     // Проверяем безопасность пути
     if (!file_manager::is_path_safe(web_dir, filename)) {
+        LOG(WARNING) << "Unsafe static file path access attempt: " << filename;
         return create_response(http::status::forbidden, "Access denied");
     }
     
     // Читаем файл
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
     if (!file) {
+        VLOG(1) << "Static file not found: " << filename;
         return create_response(http::status::not_found, "File not found");
     }
     
@@ -157,6 +161,8 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
     file.seekg(0, std::ios::beg);
     file.read(file_data.data(), file_size);
     file.close();
+    
+    VLOG(1) << "Static file served: " << filename << " (" << file_size << " bytes)";
     
     http::response<http::string_body> res{http::status::ok, 11};
     res.set(http::field::content_type, get_mime_type(filename));
@@ -327,6 +333,7 @@ http::response<http::string_body> request_handler::handle_initiate_upload(const 
     std::string query = std::string(req.target());
     size_t query_pos = query.find('?');
     if (query_pos == std::string::npos) {
+        LOG(WARNING) << "Initiate upload request without filename parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Filename parameter is required"})"
@@ -335,20 +342,27 @@ http::response<http::string_body> request_handler::handle_initiate_upload(const 
     
     auto filename_opt = get_query_param(query.substr(query_pos), "filename");
     if (!filename_opt) {
+        LOG(WARNING) << "Initiate upload request missing filename parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Filename parameter is required"})"
         );
     }
     
+    LOG(INFO) << "Initiating multipart upload for: " << *filename_opt;
+    
     auto upload_id_opt = _file_manager.initiate_multipart_upload(*filename_opt);
     
     if (!upload_id_opt) {
+        LOG(ERROR) << "Failed to initiate multipart upload for: " << *filename_opt;
         return create_response(
             http::status::internal_server_error,
             R"({"error": "Failed to initiate upload"})"
         );
     }
+    
+    LOG(INFO) << "Multipart upload initiated: " << *filename_opt 
+              << " (ID: " << *upload_id_opt << ")";
     
     json::json response_json;
     response_json["upload_id"] = *upload_id_opt;
@@ -363,6 +377,7 @@ http::response<http::string_body> request_handler::handle_upload_part(const http
     std::string query = std::string(req.target());
     size_t query_pos = query.find('?');
     if (query_pos == std::string::npos) {
+        LOG(WARNING) << "Upload part request without required parameters";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID and part number are required"})"
@@ -373,6 +388,7 @@ http::response<http::string_body> request_handler::handle_upload_part(const http
     auto part_number_opt = get_query_param_int(query.substr(query_pos), "part_number");
     
     if (!upload_id_opt || !part_number_opt) {
+        LOG(WARNING) << "Upload part request missing required parameters";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID and part number are required"})"
@@ -382,20 +398,30 @@ http::response<http::string_body> request_handler::handle_upload_part(const http
     std::vector<char> data(req.body().begin(), req.body().end());
     
     if (data.empty()) {
+        LOG(WARNING) << "Upload part request with empty body: upload_id=" << *upload_id_opt 
+                     << ", part=" << *part_number_opt;
         return create_response(
             http::status::bad_request,
             R"({"error": "Part data is required"})"
         );
     }
     
+    LOG(INFO) << "Uploading part: upload_id=" << *upload_id_opt 
+              << ", part=" << *part_number_opt << ", size=" << data.size() << " bytes";
+    
     bool success = _file_manager.upload_part(*upload_id_opt, *part_number_opt, data);
     
     if (!success) {
+        LOG(ERROR) << "Failed to upload part: upload_id=" << *upload_id_opt 
+                   << ", part=" << *part_number_opt;
         return create_response(
             http::status::internal_server_error,
             R"({"error": "Failed to upload part"})"
         );
     }
+    
+    LOG(INFO) << "Part uploaded successfully: upload_id=" << *upload_id_opt 
+              << ", part=" << *part_number_opt;
     
     json::json response_json;
     response_json["success"] = true;
@@ -411,6 +437,7 @@ http::response<http::string_body> request_handler::handle_complete_upload(const 
     std::string query = std::string(req.target());
     size_t query_pos = query.find('?');
     if (query_pos == std::string::npos) {
+        LOG(WARNING) << "Complete upload request without upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
@@ -419,6 +446,7 @@ http::response<http::string_body> request_handler::handle_complete_upload(const 
     
     auto upload_id_opt = get_query_param(query.substr(query_pos), "upload_id");
     if (!upload_id_opt) {
+        LOG(WARNING) << "Complete upload request missing upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
@@ -430,14 +458,28 @@ http::response<http::string_body> request_handler::handle_complete_upload(const 
         json::json request_json = json::json::parse(req.body());
         std::vector<int> part_numbers = request_json["parts"].get<std::vector<int>>();
         
+        if (part_numbers.empty()) {
+            LOG(WARNING) << "Complete upload with empty parts list: " << *upload_id_opt;
+            return create_response(
+                http::status::bad_request,
+                R"({"error": "Parts list cannot be empty"})"
+            );
+        }
+        
+        LOG(INFO) << "Completing upload: upload_id=" << *upload_id_opt 
+                  << ", parts=" << part_numbers.size();
+        
         bool success = _file_manager.complete_multipart_upload(*upload_id_opt, part_numbers);
         
         if (!success) {
+            LOG(ERROR) << "Failed to complete upload: " << *upload_id_opt;
             return create_response(
                 http::status::internal_server_error,
                 R"({"error": "Failed to complete upload"})"
             );
         }
+        
+        LOG(INFO) << "Upload completed successfully: " << *upload_id_opt;
         
         json::json response_json;
         response_json["success"] = true;
@@ -446,7 +488,7 @@ http::response<http::string_body> request_handler::handle_complete_upload(const 
         
         return create_response(http::status::ok, response_json.dump());
     } catch (const json::json::exception& e) {
-    	LOG(ERROR) << "Exception handling request: " << e.what();
+        LOG(ERROR) << "Exception handling complete upload request: " << e.what();
         return create_response(
             http::status::bad_request,
             R"({"error": "Invalid request body"})"
@@ -459,6 +501,7 @@ http::response<http::string_body> request_handler::handle_abort_upload(const htt
     std::string query = std::string(req.target());
     size_t query_pos = query.find('?');
     if (query_pos == std::string::npos) {
+        LOG(WARNING) << "Abort upload request without upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
@@ -467,20 +510,26 @@ http::response<http::string_body> request_handler::handle_abort_upload(const htt
     
     auto upload_id_opt = get_query_param(query.substr(query_pos), "upload_id");
     if (!upload_id_opt) {
+        LOG(WARNING) << "Abort upload request missing upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
         );
     }
     
+    LOG(INFO) << "Aborting upload: " << *upload_id_opt;
+    
     bool success = _file_manager.abort_multipart_upload(*upload_id_opt);
     
     if (!success) {
+        LOG(WARNING) << "Attempted to abort non-existent upload: " << *upload_id_opt;
         return create_response(
             http::status::not_found,
             R"({"error": "Upload not found"})"
         );
     }
+    
+    LOG(INFO) << "Upload aborted successfully: " << *upload_id_opt;
     
     json::json response_json;
     response_json["success"] = true;
@@ -495,6 +544,7 @@ http::response<http::string_body> request_handler::handle_get_progress(const htt
     std::string query = std::string(req.target());
     size_t query_pos = query.find('?');
     if (query_pos == std::string::npos) {
+        LOG(WARNING) << "Get progress request without upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
@@ -503,6 +553,7 @@ http::response<http::string_body> request_handler::handle_get_progress(const htt
     
     auto upload_id_opt = get_query_param(query.substr(query_pos), "upload_id");
     if (!upload_id_opt) {
+        LOG(WARNING) << "Get progress request missing upload_id parameter";
         return create_response(
             http::status::bad_request,
             R"({"error": "Upload ID is required"})"
@@ -512,11 +563,15 @@ http::response<http::string_body> request_handler::handle_get_progress(const htt
     auto progress_opt = _file_manager.get_upload_progress(*upload_id_opt);
     
     if (!progress_opt) {
+        VLOG(1) << "Progress requested for non-existent upload: " << *upload_id_opt;
         return create_response(
             http::status::not_found,
             R"({"error": "Upload not found"})"
         );
     }
+    
+    VLOG(1) << "Progress retrieved for upload: " << *upload_id_opt 
+            << ", parts=" << progress_opt->size();
     
     json::json response_json;
     response_json["upload_id"] = *upload_id_opt;
@@ -529,7 +584,6 @@ http::response<http::string_body> request_handler::handle_get_progress(const htt
     return create_response(http::status::ok, response_json.dump());
 }
 
-
 http::response<http::string_body> request_handler::create_response(
     http::status status,
     const std::string& body,
@@ -539,6 +593,11 @@ http::response<http::string_body> request_handler::create_response(
     res.set(http::field::content_type, content_type);
     res.set(http::field::access_control_allow_origin, "*");
     res.body() = body;
+    
+    VLOG(2) << "Creating response: status=" << static_cast<int>(status) 
+            << ", content_type=" << content_type 
+            << ", body_size=" << body.size();
+    
     return res;
 }
 
@@ -563,6 +622,8 @@ std::string request_handler::get_filename_from_path(const std::string& path) con
         return "";
     }
     
+    VLOG(2) << "Extracted filename from path: " << path << " -> " << clean_path;
+    
     return clean_path;
 }
 
@@ -571,6 +632,7 @@ std::optional<std::string> request_handler::get_query_param(const std::string& q
 {
     size_t pos = query.find(param + "=");
     if (pos == std::string::npos) {
+        VLOG(2) << "Query parameter not found: " << param;
         return std::nullopt;
     }
     
@@ -578,9 +640,11 @@ std::optional<std::string> request_handler::get_query_param(const std::string& q
     size_t end_pos = query.find('&', pos);
     
     if (end_pos == std::string::npos) {
+        VLOG(2) << "Query parameter found: " << param;
         return query.substr(pos);
     }
     
+    VLOG(2) << "Query parameter found: " << param;
     return query.substr(pos, end_pos - pos);
 }
 
@@ -588,12 +652,16 @@ std::optional<int> request_handler::get_query_param_int(const std::string& query
 {
     auto str_opt = get_query_param(query, param);
     if (!str_opt) {
+        VLOG(2) << "Query parameter not found (int): " << param;
         return std::nullopt;
     }
     
     try {
-        return std::stoi(*str_opt);
+        int value = std::stoi(*str_opt);
+        VLOG(2) << "Query parameter parsed (int): " << param << " = " << value;
+        return value;
     } catch (...) {
+        LOG(WARNING) << "Failed to parse query parameter as int: " << param << " = " << *str_opt;
         return std::nullopt;
     }
 }
