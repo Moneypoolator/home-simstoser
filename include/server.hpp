@@ -9,22 +9,22 @@
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/asio/ssl.hpp>
-#include "file_manager.hpp"
+
 #include "authenticator.hpp"
 #include "authorizer.hpp"
 
 namespace asio = boost::asio;
-namespace beast = boost::beast;
+// namespace beast = boost::beast;
 using tcp = asio::ip::tcp;
-namespace ssl = asio::ssl;
+// namespace ssl = asio::ssl;
 
 class s3_server {
 public:
     struct ssl_config {
-        std::string cert_file;      // Путь к файлу сертификата
-        std::string private_key;    // Путь к приватному ключу
-        std::optional<std::string> dh_file;  // Путь к файлу Diffie-Hellman параметров (опционально)
-        bool verify_client = false; // Требовать проверку клиента
+        std::string cert_file;
+        std::string private_key;
+        std::optional<std::string> dh_file;
+        bool verify_client = false;
     };
 
     s3_server(const std::string& address, 

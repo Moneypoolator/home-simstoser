@@ -6,6 +6,8 @@
 #include <chrono>
 #include <glog/logging.h>
 
+namespace ssl = asio::ssl;
+
 s3_server::s3_server(const std::string& address, 
                      unsigned short port, 
                      const std::string& storage_path,
