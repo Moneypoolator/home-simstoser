@@ -349,7 +349,10 @@ void request_handler::handle_request(
         }
         else if (req.method() == http::verb::delete_) {
             response = handle_delete(req);
-        }
+        } 
+        else if (path == "/openapi.yaml" || path == "/api/spec") {
+            response = handle_openapi_spec(req);
+        } 
         else {
             response = create_response(
                 http::status::method_not_allowed,
@@ -648,6 +651,22 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
     return res;
 }
 
+http::response<http::string_body> request_handler::handle_openapi_spec(const http::request<http::string_body>& req)
+{
+    // Читаем файл openapi.yaml
+    std::ifstream file("openapi.yaml");
+    if (!file) {
+        return create_response(http::status::not_found, "Specification not found");
+    }
+    
+    std::string content((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+    
+    http::response<http::string_body> res{http::status::ok, req.version()};
+    res.set(http::field::content_type, "application/yaml");
+    res.body() = content;
+    return res;
+}
 
 http::response<http::string_body> request_handler::handle_upload_part(const http::request<http::string_body>& req)
 {

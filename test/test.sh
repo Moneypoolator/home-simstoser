@@ -103,3 +103,33 @@ echo "user1,admin@example.com,ADMIN" > users.csv
 
 # Аутентификация включена, но некоторые файлы публичные
 ./s3_server --keys access_keys.csv --port 9000
+
+
+
+# Примеры использования
+
+# Загрузка файла
+curl -X PUT http://localhost:9000/myfile.txt \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=YOUR_KEY/20230101/region/s3/aws4_request, SignedHeaders=host;content-type, Signature=YOUR_SIGNATURE" \
+  -H "Content-Type: text/plain" \
+  --data-binary "@local_file.txt"
+
+# Скачивание файла
+curl -X GET http://localhost:9000/myfile.txt \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=YOUR_KEY/20230101/region/s3/aws4_request, SignedHeaders=host, Signature=YOUR_SIGNATURE" \
+  -o downloaded.txt
+
+# Multipart upload
+# 1. Инициировать загрузку
+UPLOAD_ID=$(curl -X POST "http://localhost:9000/upload/initiate?filename=large_video.mp4" | jq -r '.upload_id')
+
+# 2. Загрузить части
+curl -X PUT "http://localhost:9000/upload/part?upload_id=$UPLOAD_ID&part_number=1" --data-binary "@part1.bin"
+curl -X PUT "http://localhost:9000/upload/part?upload_id=$UPLOAD_ID&part_number=2" --data-binary "@part2.bin"
+
+# 3. Завершить загрузку
+curl -X POST "http://localhost:9000/upload/complete?upload_id=$UPLOAD_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"parts": [1, 2]}'
+
+

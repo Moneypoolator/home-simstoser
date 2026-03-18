@@ -1,0 +1,745 @@
+openapi: 3.0.3
+info:
+  title: S3-Compatible Storage Server API
+  description: |
+    RESTful API для домашнего S3-совместимого хранилища файлов.
+    
+    ## Особенности
+    
+    - Простое хранение и извлечение объектов
+    - Список файлов в хранилище
+    - Поддержка multipart uploads для больших файлов
+    - Аутентификация с помощью AWS Signature v4
+    - CORS поддержка для веб-клиентов
+    
+    ## Аутентификация
+    
+    Сервер поддерживает аутентификацию через заголовок `Authorization` 
+    с использованием алгоритма AWS Signature Version 4.
+    
+    Формат заголовка:
+    ```
+    Authorization: AWS4-HMAC-SHA256 Credential=ACCESS_KEY_ID/DATE/REGION/SERVICE/aws4_request, SignedHeaders=host;content-type, Signature=SIGNATURE
+    ```
+  version: "1.0.0"
+  contact:
+    name: S3 Storage Team
+    email: admin@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:9000
+    description: Локальный сервер (HTTP)
+  - url: https://localhost:9000
+    description: Локальный сервер (HTTPS)
+  - url: http://your-server.com:9000
+    description: Продакшн сервер (настроить по необходимости)
+
+tags:
+  - name: Files
+    description: Операции с файлами (загрузка, скачивание, удаление)
+  - name: Listing
+    description: Получение списка файлов
+  - name: Multipart Upload
+    description: Управление многокомпонентной загрузкой
+  - name: Static Files
+    description: Обслуживание статических файлов веб-интерфейса
+
+components:
+  securitySchemes:
+    AWS4Signature:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        AWS Signature Version 4 authentication.
+        
+        Пример:
+        ```
+        Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230101/us-east-1/s3/aws4_request, SignedHeaders=host;content-type, Signature=fe5f80f77d5fa3beca038a2a822895d3e1f5e5d8c5b5e5d8c5b5e5d8c5b5e5d8
+        ```
+  
+  schemas:
+    # ========== Success Responses ==========
+    FileUploadSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        filename:
+          type: string
+          description: Имя загруженного файла
+          example: "documents/report.pdf"
+        size:
+          type: integer
+          description: Размер файла в байтах
+          example: 102400
+        etag:
+          type: string
+          description: ETag файла (MD5 хеш)
+          example: "5d41402abc4b2a76b9719d911017c592"
+      required:
+        - success
+        - filename
+        - size
+
+    FileDeleteSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "File deleted successfully"
+      required:
+        - success
+        - message
+
+    FileListResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Количество файлов
+          example: 5
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileMetadata'
+      required:
+        - count
+        - files
+
+    FileMetadata:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Имя файла (относительный путь)
+          example: "photos/vacation.jpg"
+        size:
+          type: integer
+          description: Размер файла в байтах
+          example: 2048576
+        etag:
+          type: string
+          description: ETag файла (MD5 хеш)
+          example: "9e107d9d372bb6826bd81d3542a419d6"
+        last_modified:
+          type: string
+          format: date-time
+          description: Время последнего изменения в формате ISO 8601
+          example: "2023-01-15T10:30:45Z"
+      required:
+        - name
+        - size
+        - etag
+        - last_modified
+
+    # ========== Multipart Upload ==========
+    MultipartInitiateResponse:
+      type: object
+      properties:
+        upload_id:
+          type: string
+          description: Уникальный идентификатор загрузки
+          example: "upload_1234567890abcdef"
+        filename:
+          type: string
+          description: Имя файла для загрузки
+          example: "videos/large_video.mp4"
+        message:
+          type: string
+          example: "Upload initiated successfully"
+      required:
+        - upload_id
+        - filename
+
+    MultipartPartUploadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        upload_id:
+          type: string
+          example: "upload_1234567890abcdef"
+        part_number:
+          type: integer
+          description: Номер части
+          example: 1
+        size:
+          type: integer
+          description: Размер загруженной части в байтах
+          example: 5242880
+      required:
+        - success
+        - upload_id
+        - part_number
+        - size
+
+    MultipartCompleteRequest:
+      type: object
+      properties:
+        parts:
+          type: array
+          description: Список номеров частей в правильном порядке
+          items:
+            type: integer
+            minimum: 1
+          minItems: 1
+          example: [1, 2, 3, 4]
+      required:
+        - parts
+
+    MultipartCompleteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        upload_id:
+          type: string
+          example: "upload_1234567890abcdef"
+        message:
+          type: string
+          example: "Upload completed successfully"
+      required:
+        - success
+        - upload_id
+
+    MultipartAbortResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        upload_id:
+          type: string
+          example: "upload_1234567890abcdef"
+        message:
+          type: string
+          example: "Upload aborted successfully"
+      required:
+        - success
+        - upload_id
+
+    MultipartProgressResponse:
+      type: object
+      properties:
+        upload_id:
+          type: string
+          example: "upload_1234567890abcdef"
+        parts:
+          type: object
+          description: Объект с номерами частей и их размерами
+          additionalProperties:
+            type: integer
+            description: Размер части в байтах
+          example:
+            "1": 5242880
+            "2": 5242880
+            "3": 1048576
+      required:
+        - upload_id
+        - parts
+
+    # ========== Error Responses ==========
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Описание ошибки
+      required:
+        - error
+
+    S3Error:
+      type: object
+      properties:
+        Code:
+          type: string
+          description: Код ошибки
+          example: "AccessDenied"
+        Message:
+          type: string
+          description: Сообщение об ошибке
+          example: "Access Denied"
+        RequestId:
+          type: string
+          description: Идентификатор запроса
+          example: "00000000-0000-0000-0000-000000000000"
+      required:
+        - Code
+        - Message
+        - RequestId
+      xml:
+        name: Error
+
+  parameters:
+    filenameParam:
+      name: filename
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Имя файла (может включать путь, например "folder/file.txt")
+      example: "documents/report.pdf"
+
+    uploadIdParam:
+      name: upload_id
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Уникальный идентификатор загрузки
+      example: "upload_1234567890abcdef"
+
+    partNumberParam:
+      name: part_number
+      in: query
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: Номер части (начинается с 1)
+      example: 1
+
+    filenameQueryParam:
+      name: filename
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Имя файла для инициации загрузки
+      example: "large_video.mp4"
+
+  responses:
+    FileNotFound:
+      description: Файл не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "File not found"
+
+    BadRequest:
+      description: Неверный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Неавторизованный доступ (неверная подпись)
+      content:
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/S3Error'
+          example: |
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Error>
+              <Code>InvalidSignature</Code>
+              <Message>Signature validation failed</Message>
+              <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
+            </Error>
+
+    Forbidden:
+      description: Доступ запрещен
+      content:
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/S3Error'
+          example: |
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Error>
+              <Code>AccessDenied</Code>
+              <Message>Access denied</Message>
+              <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
+            </Error>
+
+    InternalServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/S3Error'
+          example: |
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Error>
+              <Code>InternalError</Code>
+              <Message>Internal server error</Message>
+              <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
+            </Error>
+
+paths:
+  # ========== File Operations ==========
+  /{filename}:
+    get:
+      tags:
+        - Files
+      summary: Скачать файл
+      description: |
+        Скачивает файл из хранилища по указанному имени.
+        
+        **Публичный доступ:** Зависит от настроек авторизации.
+      operationId: downloadFile
+      parameters:
+        - $ref: '#/components/parameters/filenameParam'
+      responses:
+        '200':
+          description: Файл успешно скачан
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+              example: <binary file data>
+          headers:
+            ETag:
+              description: ETag файла (MD5 хеш)
+              schema:
+                type: string
+            X-File-Size:
+              description: Размер файла в байтах
+              schema:
+                type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/FileNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+        - AWS4Signature: []
+
+    put:
+      tags:
+        - Files
+      summary: Загрузить файл
+      description: |
+        Загружает файл в хранилище. Если файл с таким именем уже существует, он будет перезаписан.
+        
+        **Публичный доступ:** Зависит от настроек авторизации.
+      operationId: uploadFile
+      parameters:
+        - $ref: '#/components/parameters/filenameParam'
+      requestBody:
+        description: Содержимое файла
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Файл успешно загружен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+        - AWS4Signature: []
+
+    delete:
+      tags:
+        - Files
+      summary: Удалить файл
+      description: |
+        Удаляет файл из хранилища.
+        
+        **Публичный доступ:** Зависит от настроек авторизации.
+      operationId: deleteFile
+      parameters:
+        - $ref: '#/components/parameters/filenameParam'
+      responses:
+        '200':
+          description: Файл успешно удален
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDeleteSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/FileNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+        - AWS4Signature: []
+
+  # ========== File Listing ==========
+  /list:
+    get:
+      tags:
+        - Listing
+      summary: Получить список файлов
+      description: |
+        Возвращает список всех файлов в хранилище с их метаданными.
+        
+        **Публичный доступ:** Зависит от настроек авторизации.
+      operationId: listFiles
+      responses:
+        '200':
+          description: Список файлов успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+        - AWS4Signature: []
+
+  # ========== Multipart Upload ==========
+  /upload/initiate:
+    post:
+      tags:
+        - Multipart Upload
+      summary: Инициировать multipart upload
+      description: |
+        Инициирует многокомпонентную загрузку для больших файлов.
+        Возвращает уникальный идентификатор загрузки (upload_id), 
+        который нужно использовать для загрузки частей.
+      operationId: initiateMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/filenameQueryParam'
+      responses:
+        '200':
+          description: Загрузка успешно инициирована
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartInitiateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /upload/part:
+    put:
+      tags:
+        - Multipart Upload
+      summary: Загрузить часть файла
+      description: |
+        Загружает одну часть файла в рамках multipart upload.
+        
+        **Важно:** Части должны быть загружены последовательно, начиная с 1.
+      operationId: uploadPart
+      parameters:
+        - $ref: '#/components/parameters/uploadIdParam'
+        - $ref: '#/components/parameters/partNumberParam'
+      requestBody:
+        description: Данные части файла
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Часть успешно загружена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartPartUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /upload/complete:
+    post:
+      tags:
+        - Multipart Upload
+      summary: Завершить multipart upload
+      description: |
+        Завершает многокомпонентную загрузку, объединяя все загруженные части в один файл.
+        
+        **Важно:** Укажите все номера частей в правильном порядке.
+      operationId: completeMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/uploadIdParam'
+      requestBody:
+        description: Список номеров частей в порядке их объединения
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MultipartCompleteRequest'
+      responses:
+        '200':
+          description: Загрузка успешно завершена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartCompleteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /upload/abort:
+    delete:
+      tags:
+        - Multipart Upload
+      summary: Отменить multipart upload
+      description: |
+        Отменяет многокомпонентную загрузку и удаляет все загруженные части.
+      operationId: abortMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/uploadIdParam'
+      responses:
+        '200':
+          description: Загрузка успешно отменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartAbortResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Загрузка не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Upload not found"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /upload/progress:
+    get:
+      tags:
+        - Multipart Upload
+      summary: Получить прогресс загрузки
+      description: |
+        Возвращает информацию о загруженных частях для указанной загрузки.
+      operationId: getUploadProgress
+      parameters:
+        - $ref: '#/components/parameters/uploadIdParam'
+      responses:
+        '200':
+          description: Прогресс успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartProgressResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Загрузка не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Upload not found"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ========== Static Files (Web UI) ==========
+  /:
+    get:
+      tags:
+        - Static Files
+      summary: Главная страница веб-интерфейса
+      description: |
+        Отображает главную страницу веб-интерфейса (index.html).
+      operationId: getWebUI
+      responses:
+        '200':
+          description: Страница успешно загружена
+          content:
+            text/html:
+              schema:
+                type: string
+              example: "<!DOCTYPE html><html>...</html>"
+        '404':
+          description: Файл не найден
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "File not found"
+
+  /{path}:
+    get:
+      tags:
+        - Static Files
+      summary: Обслуживание статических файлов
+      description: |
+        Обслуживает статические файлы веб-интерфейса (CSS, JS, изображения).
+      operationId: getStaticFile
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Путь к статическому файлу
+          example: "css/style.css"
+      responses:
+        '200':
+          description: Файл успешно загружен
+          content:
+            text/css:
+              schema:
+                type: string
+            application/javascript:
+              schema:
+                type: string
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Файл не найден
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "File not found"
+        '403':
+          description: Доступ запрещен
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Access denied"
+
+# ========== Security ==========
+security:
+  - AWS4Signature: []

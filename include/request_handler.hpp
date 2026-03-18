@@ -96,6 +96,8 @@ private:
     // Static file handler
     http::response<http::string_body> handle_static_file(const std::string& path);
     
+    http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
+
     // Вспомогательные функции
     http::response<http::string_body> create_response(
         http::status status,
