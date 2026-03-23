@@ -1,13 +1,34 @@
 #include "request_handler.hpp"
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <sstream>
 #include <glog/logging.h>
 #include "logging.hpp"
 
 namespace json = nlohmann;
+
+// MIME типы для статических файлов
+static std::map<std::string, std::string> mime_types = {
+    {".html", "text/html"},
+    {".htm", "text/html"},
+    {".js", "application/javascript"},
+    {".mjs", "application/javascript"},
+    {".json", "application/json"},
+    {".css", "text/css"},
+    {".png", "image/png"},
+    {".jpg", "image/jpeg"},
+    {".jpeg", "image/jpeg"},
+    {".gif", "image/gif"},
+    {".svg", "image/svg+xml"},
+    {".ico", "image/x-icon"},
+    {".woff", "font/woff"},
+    {".woff2", "font/woff2"},
+    {".ttf", "font/ttf"},
+    {".eot", "application/vnd.ms-fontobject"},
+    {".otf", "font/otf"}
+};
 
 request_handler::request_handler(
     file_manager& file_manager,
@@ -244,8 +265,8 @@ void request_handler::handle_request(
     // CORS headers
     response.set(http::field::access_control_allow_origin, "*");
     response.set(http::field::access_control_allow_methods, "GET, POST, PUT, DELETE, OPTIONS");
-    response.set(http::field::access_control_allow_headers, "Content-Type, Authorization");
-    
+    response.set(http::field::access_control_allow_headers, "Content-Type, Authorization, X-Amz-Date, X-Amz-Security-Token");
+
     // CORS preflight
     if (req.method() == http::verb::options) {
         VLOG(2) << "Handling CORS preflight request";
@@ -260,17 +281,24 @@ void request_handler::handle_request(
     std::string path = std::string(req.target());
     
     // Обслуживание статических файлов веб-интерфейса
-    if (path.find("/upload/") == std::string::npos &&
-        path != "/list" &&
-        req.method() == http::verb::get) {
-
-        if (path.find("/upload/") == std::string::npos) {
-            response = handle_static_file(path);
-            response.prepare_payload();
-            send(std::move(response));
-            return;
-        }
+    if (is_static_file_request(path)) {
+        response = handle_static_file(path);
+        response.prepare_payload();
+        send(std::move(response));
+        return;
     }
+
+    // if (path.find("/upload/") == std::string::npos &&
+    //     path != "/list" &&
+    //     req.method() == http::verb::get) {
+
+    //     if (path.find("/upload/") == std::string::npos) {
+    //         response = handle_static_file(path);
+    //         response.prepare_payload();
+    //         send(std::move(response));
+    //         return;
+    //     }
+    // }
     
     // Определяем требуемое разрешение для запроса
     auto required_perm = get_required_permission(req);
@@ -350,7 +378,7 @@ void request_handler::handle_request(
         else if (req.method() == http::verb::delete_) {
             response = handle_delete(req);
         } 
-        else if (path == "/openapi.yaml" || path == "/api/spec") {
+        else if ((path == "/openapi.yaml" || path == "/api/spec") && req.method() == http::verb::get) {
             response = handle_openapi_spec(req);
         } 
         else {
@@ -579,76 +607,102 @@ http::response<http::string_body> request_handler::handle_initiate_upload(const 
     return create_response(http::status::ok, response_json.dump());
 }
 
+bool request_handler::is_static_file_request(const std::string& path) const
+{
+    // Статические файлы обслуживаются из /assets/ и / (index.html)
+    return path.find("/assets/") == 0 || 
+           path == "/" || 
+           path.find(".html") != std::string::npos ||
+           path.find(".js") != std::string::npos ||
+           path.find(".css") != std::string::npos ||
+           path.find(".png") != std::string::npos ||
+           path.find(".jpg") != std::string::npos ||
+           path.find(".svg") != std::string::npos ||
+           path.find(".ico") != std::string::npos ||
+           path.find(".woff") != std::string::npos ||
+           path.find(".ttf") != std::string::npos;
+}
 
 http::response<http::string_body> request_handler::handle_static_file(const std::string& path)
 {
-    std::string filename = path;
-    
-    // Если запрашивается корень, возвращаем index.html
-    if (filename == "/" || filename.empty()) {
-        filename = "/index.html";
-    }
-    
-    // Убираем начальный слэш
-    if (!filename.empty() && filename[0] == '/') {
-        filename = filename.substr(1);
-    }
-    
-    VLOG(1) << "Serving static file: " << filename;
-    
-    // Определяем MIME тип по расширению
-    auto get_mime_type = [](const std::string& fname) -> std::string {
-        size_t dot_pos = fname.find_last_of('.');
-        if (dot_pos == std::string::npos) {
-            return "application/octet-stream";
+    try {
+
+        std::string basepath = "./web/dist";
+        std::string filename = path;
+
+        // Если запрашивается корень, возвращаем index.html
+        if (filename == "/" || filename.empty()) {
+            filename = "index.html";
         }
-        
-        std::string ext = fname.substr(dot_pos + 1);
-        if (ext == "html" || ext == "htm") return "text/html";
-        if (ext == "css") return "text/css";
-        if (ext == "js") return "application/javascript";
-        if (ext == "json") return "application/json";
-        if (ext == "png") return "image/png";
-        if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
-        if (ext == "gif") return "image/gif";
-        if (ext == "svg") return "image/svg+xml";
-        if (ext == "ico") return "image/x-icon";
-        
-        return "application/octet-stream";
-    };
-    
-    // Путь к веб-файлам (относительно исполняемого файла)
-    fs::path web_dir = fs::current_path() / "web";
-    fs::path file_path = web_dir / filename;
-    
-    // Проверяем безопасность пути
-    if (!file_manager::is_path_safe(web_dir, filename)) {
-        LOG(WARNING) << "Unsafe static file path access attempt: " << filename;
-        return create_response(http::status::forbidden, "Access denied");
+
+        // Убираем начальный слэш
+        if (!filename.empty() && filename[0] == '/') {
+            filename = filename.substr(1);
+        }
+
+        VLOG(1) << "Serving static file: " << filename;
+
+        // Путь к веб-файлам (относительно исполняемого файла)
+        fs::path web_dir = fs::current_path() / "web" / "dist";
+        fs::path file_path = web_dir / filename;
+
+        // Проверяем безопасность пути
+        // if (!file_manager::is_path_safe(web_dir, filename)) {
+        fs::path resolved_path = fs::absolute(file_path);
+        fs::path base_path = fs::absolute(web_dir);
+
+        if (resolved_path.string().substr(0, base_path.string().length()) != base_path.string()) {
+            LOG(WARNING) << "Unsafe static file path access attempt: " << filename;
+            return create_response(http::status::forbidden, "Access denied");
+        }
+
+        // Читаем файл
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+        if (!file) {
+            // Если файл не найден, возвращаем index.html для SPA
+            if (path != "/") {
+                VLOG(1) << "File not found, serving index.html: " << filename;
+                return handle_static_file("/");
+            }
+            VLOG(1) << "Static file not found: " << filename;
+            return create_response(http::status::not_found, "File not found");
+        }
+
+        auto file_size = file.tellg();
+        std::vector<char> file_data(file_size);
+
+        file.seekg(0, std::ios::beg);
+        file.read(file_data.data(), file_size);
+        file.close();
+
+        VLOG(1) << "Static file served: " << filename << " (" << file_size << " bytes)";
+
+        // Определяем MIME тип
+        std::string extension = file_path.extension().string();
+
+        std::string content_type = "application/octet-stream";
+        auto it = mime_types.find(extension);
+        if (it != mime_types.end()) {
+            content_type = it->second;
+        }
+
+        http::response<http::string_body> res { http::status::ok, 11 };
+        res.set(http::field::content_type, content_type);
+        res.set(http::field::content_length, std::to_string(file_size));
+        res.set(http::field::cache_control, "max-age=3600");
+        res.body() = std::string(file_data.begin(), file_data.end());
+
+        return res;
+
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Error serving static file " << path << ": " << e.what();
+        return create_response(http::status::internal_server_error, "Internal server error");
     }
-    
-    // Читаем файл
-    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        VLOG(1) << "Static file not found: " << filename;
-        return create_response(http::status::not_found, "File not found");
-    }
-    
-    auto file_size = file.tellg();
-    std::vector<char> file_data(file_size);
-    
-    file.seekg(0, std::ios::beg);
-    file.read(file_data.data(), file_size);
-    file.close();
-    
-    VLOG(1) << "Static file served: " << filename << " (" << file_size << " bytes)";
-    
-    http::response<http::string_body> res{http::status::ok, 11};
-    res.set(http::field::content_type, get_mime_type(filename));
-    res.set(http::field::content_length, std::to_string(file_size));
-    res.body() = std::string(file_data.begin(), file_data.end());
-    
-    return res;
+}
+
+http::response<http::string_body> request_handler::handle_index(const http::request<http::string_body>& /*req*/)
+{
+    return handle_static_file("/");
 }
 
 http::response<http::string_body> request_handler::handle_openapi_spec(const http::request<http::string_body>& req)

@@ -95,7 +95,10 @@ private:
     
     // Static file handler
     http::response<http::string_body> handle_static_file(const std::string& path);
-    
+    // В классе request_handler добавить:
+    http::response<http::string_body> handle_index(const http::request<http::string_body>& req);
+    bool is_static_file_request(const std::string& path) const;
+
     http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
 
     // Вспомогательные функции

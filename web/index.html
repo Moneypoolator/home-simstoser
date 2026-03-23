@@ -1,115 +1,12 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>S3 Storage Manager</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div class="container">
-        <header class="header">
-            <h1>🗄️ S3 Storage Manager</h1>
-            <div class="server-info">
-                <span id="serverStatus" class="status-indicator">🟢 Online</span>
-                <span id="storageInfo">📦 0 файлов</span>
-            </div>
-        </header>
-
-        <div class="upload-section">
-            <div class="upload-box" id="dropZone">
-                <div class="upload-icon">📤</div>
-                <h2>Перетащите файлы сюда</h2>
-                <p>или нажмите для выбора файлов</p>
-                <input type="file" id="fileInput" multiple accept="*/*" hidden>
-                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                    Выбрать файлы
-                </button>
-                <div class="upload-options">
-                    <label>
-                        <input type="checkbox" id="useMultipart" checked>
-                        Загружать по частям (для больших файлов)
-                    </label>
-                    <input type="number" id="chunkSize" value="5" min="1" max="100">
-                    <span>MB на часть</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="stats-section">
-            <div class="stat-card">
-                <div class="stat-value" id="totalFiles">0</div>
-                <div class="stat-label">Файлов</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="totalSize">0 B</div>
-                <div class="stat-label">Общий размер</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="uploadSpeed">-</div>
-                <div class="stat-label">Скорость загрузки</div>
-            </div>
-        </div>
-
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="files">📁 Файлы</button>
-            <button class="tab-btn" data-tab="uploads">⬆️ Загрузки</button>
-            <button class="tab-btn" data-tab="settings">⚙️ Настройки</button>
-        </div>
-
-        <div class="tab-content active" id="files-tab">
-            <div class="toolbar">
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="🔍 Поиск файлов..." 
-                           oninput="filterFiles()">
-                </div>
-                <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteBtn">
-                    🗑️ Удалить выбранное
-                </button>
-                <button class="btn btn-secondary" onclick="refreshFileList()">
-                    🔄 Обновить
-                </button>
-            </div>
-            <div class="file-list" id="fileList">
-                <div class="empty-state">
-                    <div class="empty-icon">📭</div>
-                    <p>Нет файлов</p>
-                    <p class="empty-subtext">Загрузите первый файл</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-content" id="uploads-tab">
-            <div class="upload-list" id="uploadList">
-                <div class="empty-state">
-                    <div class="empty-icon">⬆️</div>
-                    <p>Нет активных загрузок</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-content" id="settings-tab">
-            <div class="settings-section">
-                <h3>Настройки сервера</h3>
-                <div class="setting-item">
-                    <label for="serverUrl">URL сервера:</label>
-                    <input type="text" id="serverUrl" value="http://localhost:9000" 
-                           class="setting-input">
-                </div>
-                <div class="setting-item">
-                    <label>Максимальный размер файла для обычной загрузки:</label>
-                    <input type="number" id="maxFileSize" value="50" min="1" max="1000">
-                    <span>MB</span>
-                </div>
-                <button class="btn btn-success" onclick="saveSettings()">
-                    💾 Сохранить настройки
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <div class="notification" id="notification"></div>
-
-    <script src="app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>S3 Storage</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

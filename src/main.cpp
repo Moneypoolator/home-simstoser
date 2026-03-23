@@ -9,8 +9,9 @@ namespace fs = std::filesystem;
 
 std::atomic<bool> g_running{true};
 
-void signal_handler(int signal) {
-    LOG(INFO) << "Received signal " << signal << ", shutting down...";
+void signal_handler(int signal)
+{
+    std::cout << "\nReceived signal " << signal << ", shutting down..." << std::endl;
     g_running = false;
 }
 
@@ -58,8 +59,11 @@ int main(int argc, char* argv[])
     std::string address = "0.0.0.0";
     unsigned short port = 9000;
     std::string storage_path = "./storage";
-    std::string keys_file = "";
-    std::string users_file = "";
+    std::string keys_file = "./access_keys.csv";
+    std::string users_file = "./users.csv";
+    bool enable_auth = true;
+    bool enable_ssl = false;
+    
     bool use_ssl = false;
     std::string cert_file = "./certs/server.crt";
     std::string key_file = "./certs/server.key";
@@ -83,8 +87,12 @@ int main(int argc, char* argv[])
         else if (arg == "--users" || arg == "-u") {
             if (i + 1 < argc) users_file = argv[++i];
         }
+        else if (arg == "--no-auth") {
+            enable_auth = false;
+        }
         else if (arg == "--ssl" || arg == "-S") {
             use_ssl = true;
+            enable_ssl = true;
         }
         else if (arg == "--cert") {
             if (i + 1 < argc) cert_file = argv[++i];
@@ -109,9 +117,11 @@ int main(int argc, char* argv[])
                       << "  -a, --address <addr>   Bind address (default: 0.0.0.0)\n"
                       << "  -p, --port <port>      Port number (default: 9000)\n"
                       << "  -s, --storage <path>   Storage directory (default: ./storage)\n"
-                      << "  -k, --keys <file>      Access keys file for authentication\n"
-                      << "  -u, --users <file>     Users file for authorization\n"
-                      << "  -S, --ssl              Enable HTTPS/SSL\n"
+                      << "  -k, --keys <file>      Keys file (default: ./keys.json)\n"
+                      << "  -u, --users <file>     Users file (default: ./users.json)\n"
+                      << "      --no-auth          Disable authentication\n"
+                      << "      --ssl              Enable SSL/TLS\n"
+                      
                       << "      --cert <file>      SSL certificate file\n"
                       << "      --key <file>       SSL private key file\n"
                       << "  -h, --help             Show this help message\n";
