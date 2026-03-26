@@ -130,6 +130,12 @@ int main(int argc, char* argv[])
         }
     }
     
+    // Если аутентификация отключена, очищаем файлы ключей и пользователей
+    if (!enable_auth) {
+        keys_file = "";
+        users_file = "";
+    }
+
     // Установка обработчика сигналов
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);

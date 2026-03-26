@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ToastProvider } from './components/common/Toast';
 import { LoginPage } from './pages/LoginPage';
 import { Dashboard } from './pages/Dashboard';
+import { FilesPage } from './pages/FilesPage';
 import { UsersPage } from './pages/UsersPage';
 import { KeysPage } from './pages/KeysPage';
 import { PoliciesPage } from './pages/PoliciesPage';
@@ -27,6 +28,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/files"
+            element={
+              <ProtectedRoute>
+                <FilesPage />
               </ProtectedRoute>
             }
           />

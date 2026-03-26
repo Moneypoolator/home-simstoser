@@ -325,8 +325,13 @@ void request_handler::handle_request(
             );
         }
     } else if (required_perm) {
+        // Если аутентификация и авторизация отключены, разрешаем доступ
+        if (!_auth_enabled && !_authorization_enabled) {
+            access_granted = true;
+            VLOG(2) << "Access granted (auth disabled)";
+        }
         // Аутентификация неуспешна, проверяем публичный доступ
-        if (check_public_access(req, *required_perm)) {
+        else if (check_public_access(req, *required_perm)) {
             access_granted = true;
             VLOG(2) << "Access granted via public access";
         } else {
@@ -368,6 +373,9 @@ void request_handler::handle_request(
         }
         else if (path == "/list" && req.method() == http::verb::get) {
             response = handle_list(req);
+        }
+        else if (req.method() == http::verb::get && (path == "/files" || path == "/users" || path == "/keys" || path == "/policies" || path == "/settings" || path == "/dashboard" || path == "/login")) {
+            response = handle_static_file("/");
         }
         else if (req.method() == http::verb::get) {
             response = handle_get(req);
