@@ -11,6 +11,7 @@ find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(glog REQUIRED)
 find_package(Threads REQUIRED)
+find_package(GTest QUIET)
 
 
 # Исходники
@@ -71,3 +72,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     )
 endif()
 
+if(GTest_FOUND)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

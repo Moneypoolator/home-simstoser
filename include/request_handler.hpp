@@ -22,6 +22,8 @@ namespace http = beast::http;
 //     MANAGE_ACL
 // };
 
+class RequestHandlerTest; // forward declaration for friend
+
 class request_handler {
 public:
     explicit request_handler(
@@ -39,8 +41,19 @@ public:
     // Включение/выключение проверок
     void set_auth_enabled(bool enabled) { _auth_enabled = enabled; }
     void set_authorization_enabled(bool enabled) { _authorization_enabled = enabled; }
-    
+    http::response<http::string_body> handle_get(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_put(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_delete(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_list(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_get_progress(const http::request<http::string_body>& req);
+    http::response<http::string_body> create_response(
+        http::status status,
+        const std::string& body = "",
+        const std::string& content_type = "application/json"
+    );
+    std::string get_filename_from_path(const std::string& path) const;
 private:
+    friend class RequestHandlerTest;
     file_manager& _file_manager;
     authenticator* _authenticator;
     authorizer* _authorizer;
@@ -81,17 +94,12 @@ private:
     static std::string permission_to_string(permission_type perm);
     
     // Обработчики для разных методов
-    http::response<http::string_body> handle_get(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_put(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_delete(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_list(const http::request<http::string_body>& req);
     
     // Multipart upload handlers
     http::response<http::string_body> handle_initiate_upload(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_complete_upload(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_abort_upload(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_get_progress(const http::request<http::string_body>& req);
     
     // Static file handler
     http::response<http::string_body> handle_static_file(const std::string& path);
@@ -102,11 +110,6 @@ private:
     http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
 
     // Вспомогательные функции
-    http::response<http::string_body> create_response(
-        http::status status,
-        const std::string& body = "",
-        const std::string& content_type = "application/json"
-    );
     
     http::response<http::string_body> create_error_response(
         http::status status,
@@ -114,7 +117,6 @@ private:
         const std::string& message
     );
     
-    std::string get_filename_from_path(const std::string& path) const;
     std::optional<std::string> get_query_param(const std::string& query, const std::string& param) const;
     std::optional<int> get_query_param_int(const std::string& query, const std::string& param) const;
     

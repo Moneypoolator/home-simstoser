@@ -1,0 +1,67 @@
+find_package(GTest REQUIRED)
+
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${GTEST_INCLUDE_DIRS}
+)
+
+# Модульные тесты
+add_executable(unit_tests
+    file_manager_test.cpp
+    request_handler_test.cpp
+    ../src/file_manager.cpp
+    ../src/request_handler.cpp
+    ../src/authenticator.cpp
+    ../src/authorizer.cpp
+)
+
+target_link_libraries(unit_tests
+    GTest::gtest
+    GTest::gtest_main
+    Boost::system
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    glog::glog
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+)
+
+# Проверка поддержки filesystem (повторяем логику из корневого CMakeLists.txt)
+include(CheckIncludeFileCXX)
+check_include_file_cxx(filesystem HAVE_FILESYSTEM)
+if(HAVE_FILESYSTEM)
+    target_compile_definitions(unit_tests PRIVATE HAVE_FILESYSTEM=1)
+else()
+    target_link_libraries(unit_tests PRIVATE stdc++fs)
+endif()
+
+# Интеграционные тесты
+add_executable(integration_tests
+    server_integration_test.cpp
+    ../src/server.cpp
+    ../src/file_manager.cpp
+    ../src/request_handler.cpp
+    ../src/authenticator.cpp
+    ../src/authorizer.cpp
+)
+
+target_link_libraries(integration_tests
+    GTest::gtest
+    GTest::gtest_main
+    Boost::system
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    glog::glog
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+)
+
+# Проверка поддержки filesystem (повторяем логику из корневого CMakeLists.txt)
+include(CheckIncludeFileCXX)
+check_include_file_cxx(filesystem HAVE_FILESYSTEM)
+if(HAVE_FILESYSTEM)
+    target_compile_definitions(integration_tests PRIVATE HAVE_FILESYSTEM=1)
+else()
+    target_link_libraries(integration_tests PRIVATE stdc++fs)
+endif()
+
