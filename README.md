@@ -30,6 +30,7 @@ The application consists of three main components:
 ### Prerequisites
 
 #### System Requirements
+
 - Linux, macOS, or Windows with WSL2
 - 2GB RAM minimum, 4GB recommended
 - 1GB free disk space for the application + storage for your files
@@ -37,6 +38,7 @@ The application consists of three main components:
 #### Dependencies
 
 **Backend (C++ Server):**
+
 - C++20 compatible compiler (GCC 11+ or Clang 13+)
 - CMake 3.15+
 - Boost 1.75+ (system component)
@@ -45,6 +47,7 @@ The application consists of three main components:
 - Google Logging (glog)
 
 **Frontend (Web UI):**
+
 - Node.js 18+ and npm/yarn
 - TypeScript 5.7+
 
@@ -53,22 +56,26 @@ The application consists of three main components:
 1. **Install System Dependencies**
 
    **Ubuntu/Debian:**
+
    ```bash
    sudo apt update
    sudo apt install -y build-essential cmake libboost-system-dev libssl-dev nlohmann-json3-dev libgoogle-glog-dev
    ```
 
    **Fedora/RHEL:**
+
    ```bash
    sudo dnf install -y gcc-c++ cmake boost-devel openssl-devel nlohmann-json-devel glog-devel
    ```
 
    **macOS (Homebrew):**
+
    ```bash
    brew install cmake boost openssl nlohmann-json glog
    ```
 
 2. **Install Node.js and npm**
+
    ```bash
    # Using Node Version Manager (recommended)
    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
@@ -77,6 +84,7 @@ The application consists of three main components:
    ```
 
 3. **Clone the Repository**
+
    ```bash
    git clone https://github.com/Moneypoolator/home-simstoser.git
    cd home-s3-storage
@@ -87,16 +95,19 @@ The application consists of three main components:
 ### Backend Server Build
 
 1. **Create Build Directory**
+
    ```bash
    mkdir -p build && cd build
    ```
 
 2. **Configure with CMake**
+
    ```bash
    cmake .. -DCMAKE_BUILD_TYPE=Release
    ```
 
 3. **Compile the Server**
+
    ```bash
    make -j$(nproc)
    ```
@@ -106,16 +117,19 @@ The application consists of three main components:
 ### Frontend Web UI Build
 
 1. **Navigate to Web Directory**
+
    ```bash
    cd ../web
    ```
 
 2. **Install Dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Build for Production**
+
    ```bash
    npm run build
    ```
@@ -125,12 +139,14 @@ The application consists of three main components:
 ### Combined Build Script
 
 You can also use the provided build script:
+
 ```bash
 chmod +x build-run.sh
 ./build-run.sh
 ```
 
 This script will:
+
 1. Build the frontend web UI (`npm run build` in `web/` directory)
 2. Build the backend C++ server (creates `build/` directory, runs CMake and make)
 3. Copy the built frontend to the appropriate location
@@ -143,12 +159,14 @@ This script will:
 ### Running the Server
 
 #### Basic Startup
+
 ```bash
 cd build
 ./s3_server
 ```
 
 This starts the server with default settings:
+
 - Address: `0.0.0.0` (all interfaces)
 - Port: `9000`
 - Storage directory: `./storage`
@@ -173,27 +191,33 @@ This starts the server with default settings:
 #### Example Usage
 
 1. **Run on specific port with custom storage:**
+
    ```bash
    ./s3_server --port 8080 --storage /mnt/data/storage
    ```
 
 2. **Run with HTTPS (SSL/TLS):**
+
    ```bash
    ./s3_server --ssl --cert ./certs/server.crt --key ./certs/server.key
    ```
+
    *Note: The server will automatically generate self-signed certificates if they don't exist.*
 
 3. **Run without authentication (development mode):**
+
    ```bash
    ./s3_server --no-auth
    ```
 
 4. **Run with verbose logging:**
+
    ```bash
    ./s3_server --log-level 2 --log-dir ./logs
    ```
 
 5. **Run in background:**
+
    ```bash
    nohup ./s3_server > server.log 2>&1 &
    ```
@@ -210,6 +234,7 @@ The server provides a RESTful API with S3-like semantics. For complete API docum
 #### Core File Operations
 
 ##### Upload a File (PUT)
+
 ```bash
 curl -X PUT http://localhost:9000/my-file.txt \
   -H "Content-Type: application/octet-stream" \
@@ -217,16 +242,19 @@ curl -X PUT http://localhost:9000/my-file.txt \
 ```
 
 ##### Download a File (GET)
+
 ```bash
 curl -X GET http://localhost:9000/my-file.txt -o downloaded-file.txt
 ```
 
 ##### List Files (GET /list)
+
 ```bash
 curl -X GET http://localhost:9000/list
 ```
 
 ##### Delete a File (DELETE)
+
 ```bash
 curl -X DELETE http://localhost:9000/my-file.txt
 ```
@@ -236,6 +264,7 @@ curl -X DELETE http://localhost:9000/my-file.txt
 For large files (> 100MB), use multipart upload:
 
 ##### 1. Initiate Multipart Upload
+
 ```bash
 curl -X POST http://localhost:9000/upload/initiate \
   -H "Content-Type: application/json" \
@@ -243,6 +272,7 @@ curl -X POST http://localhost:9000/upload/initiate \
 ```
 
 ##### 2. Upload Part
+
 ```bash
 curl -X PUT "http://localhost:9000/upload/part?upload_id=UUID&part_number=1" \
   -H "Content-Type: application/octet-stream" \
@@ -250,6 +280,7 @@ curl -X PUT "http://localhost:9000/upload/part?upload_id=UUID&part_number=1" \
 ```
 
 ##### 3. Complete Upload
+
 ```bash
 curl -X POST http://localhost:9000/upload/complete \
   -H "Content-Type: application/json" \
@@ -257,11 +288,13 @@ curl -X POST http://localhost:9000/upload/complete \
 ```
 
 ##### 4. Check Upload Progress
+
 ```bash
 curl -X GET "http://localhost:9000/upload/progress?upload_id=UUID"
 ```
 
 ##### 5. Abort Upload
+
 ```bash
 curl -X DELETE "http://localhost:9000/upload/abort?upload_id=UUID"
 ```
@@ -278,6 +311,7 @@ curl -X GET http://localhost:9000/list \
 #### OpenAPI Specification
 
 The complete API documentation is available in OpenAPI 3.0 format:
+
 - `GET /openapi.yaml` - YAML format
 - `GET /api/spec` - JSON format
 
@@ -301,6 +335,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 ## 5. Road Map of Product Development
 
 ### Phase 1: Core Stability & Security (Current)
+
 - [x] Basic S3 API implementation (PUT, GET, DELETE, LIST)
 - [x] Multipart upload support
 - [x] Web interface for file management
@@ -311,6 +346,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [ ] Rate limiting and DDoS protection
 
 ### Phase 2: Enhanced Features & Performance
+
 - [ ] Bucket management (create, delete, configure buckets)
 - [ ] Object versioning and lifecycle policies
 - [ ] Server-side encryption
@@ -321,6 +357,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [ ] Connection pooling and keep-alive optimization
 
 ### Phase 3: Monitoring & Administration
+
 - [ ] Comprehensive logging with log rotation
 - [ ] Prometheus metrics endpoint
 - [ ] Health check endpoints
@@ -330,6 +367,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [ ] Audit logging for security compliance
 
 ### Phase 4: Scalability & Advanced Features
+
 - [ ] Database backend for metadata (SQLite/PostgreSQL)
 - [ ] Replication between multiple instances
 - [ ] CDN integration support
@@ -339,6 +377,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [ ] WebSocket support for real-time updates
 
 ### Phase 5: Enterprise & Ecosystem
+
 - [ ] LDAP/Active Directory integration
 - [ ] OAuth2/OIDC authentication
 - [ ] Webhook notifications for file events
