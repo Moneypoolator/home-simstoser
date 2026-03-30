@@ -16,21 +16,21 @@ find_package(GTest QUIET)
 
 # Исходники
 set(sources
-    src/main.cpp
-    src/server.cpp
-    src/file_manager.cpp
-    src/request_handler.cpp
-    src/authenticator.cpp
-    src/authorizer.cpp
+    backend/src/main.cpp
+    backend/src/server.cpp
+    backend/src/file_manager.cpp
+    backend/src/request_handler.cpp
+    backend/src/authenticator.cpp
+    backend/src/authorizer.cpp
 )
 
 # Заголовки
 set(headers
-    include/server.hpp
-    include/file_manager.hpp
-    include/request_handler.hpp
-    include/authenticator.hpp
-    include/authorizer.hpp
+    backend/include/server.hpp
+    backend/include/file_manager.hpp
+    backend/include/request_handler.hpp
+    backend/include/authenticator.hpp
+    backend/include/authorizer.hpp
 )
 
 # Executable
@@ -38,7 +38,7 @@ add_executable(s3_server ${sources} ${headers})
 
 # Включаем директории
 target_include_directories(s3_server PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend/include
     ${Boost_INCLUDE_DIRS}
     ${GLOG_INCLUDE_DIRS}
 )
@@ -74,5 +74,5 @@ endif()
 
 if(GTest_FOUND)
     enable_testing()
-    add_subdirectory(tests)
+    add_subdirectory(backend/tests)
 endif()
