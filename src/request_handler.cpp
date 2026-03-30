@@ -204,12 +204,17 @@ std::string request_handler::extract_resource_path(
     if (!path.empty() && path[0] == '/') {
         path = path.substr(1);
     }
-    
+
+    // Если путь начинается с "api/", удаляем этот префикс
+    if (path.compare(0, 4, "api/") == 0) {
+        path = path.substr(4);
+    }
+
     // Для специальных эндпоинтов возвращаем пустой путь
     if (path.find("upload/") != std::string::npos || path == "list") {
         return "";
     }
-    
+
     return path;
 }
 
@@ -223,9 +228,18 @@ std::optional<permission_type> request_handler::get_required_permission(
         return std::nullopt;
     }
     
+    // Нормализуем путь: удаляем начальный слэш и префикс /api/
+    std::string normalized = path;
+    if (!normalized.empty() && normalized[0] == '/') {
+        normalized = normalized.substr(1);
+    }
+    if (normalized.compare(0, 4, "api/") == 0) {
+        normalized = normalized.substr(4);
+    }
+    
     // Определяем разрешение по методу
     if (req.method() == http::verb::get) {
-        if (path == "/list") {
+        if (normalized == "list") {
             return permission_type::LIST;
         }
         return permission_type::READ;
@@ -279,6 +293,15 @@ void request_handler::handle_request(
     }
     
     std::string path = std::string(req.target());
+    
+    // Нормализуем путь: удаляем начальный слэш и префикс /api/
+    std::string normalized_path = path;
+    if (!normalized_path.empty() && normalized_path[0] == '/') {
+        normalized_path = normalized_path.substr(1);
+    }
+    if (normalized_path.compare(0, 4, "api/") == 0) {
+        normalized_path = normalized_path.substr(4);
+    }
     
     // Обслуживание статических файлов веб-интерфейса
     if (is_static_file_request(path)) {
@@ -371,7 +394,7 @@ void request_handler::handle_request(
         else if (path.find("/upload/progress") != std::string::npos && req.method() == http::verb::get) {
             response = handle_get_progress(req);
         }
-        else if (path == "/list" && req.method() == http::verb::get) {
+        else if (normalized_path == "list" && req.method() == http::verb::get) {
             response = handle_list(req);
         }
         else if (req.method() == http::verb::get && (path == "/files" || path == "/users" || path == "/keys" || path == "/policies" || path == "/settings" || path == "/dashboard" || path == "/login")) {
@@ -996,14 +1019,19 @@ std::string request_handler::get_filename_from_path(const std::string& path) con
     if (!clean_path.empty() && clean_path[0] == '/') {
         clean_path = clean_path.substr(1);
     }
-    
+
+    // Если путь начинается с "api/", удаляем этот префикс
+    if (clean_path.compare(0, 4, "api/") == 0) {
+        clean_path = clean_path.substr(4);
+    }
+
     // Если путь - это "list", возвращаем пустую строку
     if (clean_path == "list") {
         return "";
     }
-    
+
     VLOG(2) << "Extracted filename from path: " << path << " -> " << clean_path;
-    
+
     return clean_path;
 }
 
