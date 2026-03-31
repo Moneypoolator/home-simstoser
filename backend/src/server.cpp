@@ -236,16 +236,24 @@ void s3_server::handle_session(tcp::socket socket)
         
         // Создаем объекты для чтения/записи
         beast::flat_buffer buffer;
-        http::request<http::string_body> req;
+        
+        // Создаем парсер с увеличенным лимитом размера тела
+        http::request_parser<http::string_body> parser;
+        // Устанавливаем лимит тела запроса (100 MB)
+        parser.body_limit(100 * 1024 * 1024); // 100 MB
         
         // Читаем запрос
-        http::read(socket, buffer, req, ec);
+        http::read(socket, buffer, parser, ec);
+        
         if (ec) {
             if (ec != beast::http::error::end_of_stream) {
                 LOG(WARNING) << "Read error: " << ec.message();
             }
             return;
         }
+        
+        // Получаем запрос из парсера
+        http::request<http::string_body> req = parser.release();
         
         logging::log_request(
             std::string(req.method_string()),
@@ -307,16 +315,24 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket)
         
         // Создаем объекты для чтения/записи
         beast::flat_buffer buffer;
-        http::request<http::string_body> req;
+        
+        // Создаем парсер с увеличенным лимитом размера тела
+        http::request_parser<http::string_body> parser;
+        // Устанавливаем лимит тела запроса (100 MB)
+        parser.body_limit(100 * 1024 * 1024); // 100 MB
         
         // Читаем запрос через зашифрованное соединение
-        http::read(socket, buffer, req, ec);
+        http::read(socket, buffer, parser, ec);
+        
         if (ec) {
             if (ec != beast::http::error::end_of_stream) {
                 LOG(WARNING) << "SSL read error: " << ec.message();
             }
             return;
         }
+        
+        // Получаем запрос из парсера
+        http::request<http::string_body> req = parser.release();
         
         // ЯВНОЕ ПРЕОБРАЗОВАНИЕ string_view В string
         logging::log_request(

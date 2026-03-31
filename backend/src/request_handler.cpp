@@ -723,6 +723,10 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
         res.set(http::field::content_type, content_type);
         res.set(http::field::content_length, std::to_string(file_size));
         res.set(http::field::cache_control, "max-age=3600");
+        // Добавляем CORS заголовки для поддержки crossorigin атрибутов
+        res.set(http::field::access_control_allow_origin, "*");
+        res.set(http::field::access_control_allow_methods, "GET, HEAD, OPTIONS");
+        res.set(http::field::access_control_allow_headers, "Content-Type, Authorization");
         res.body() = std::string(file_data.begin(), file_data.end());
 
         return res;
