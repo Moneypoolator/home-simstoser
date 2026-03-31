@@ -658,7 +658,6 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
 {
     try {
 
-        std::string basepath = "./web/dist";
         std::string filename = path;
 
         // Если запрашивается корень, возвращаем index.html
@@ -674,7 +673,10 @@ http::response<http::string_body> request_handler::handle_static_file(const std:
         VLOG(1) << "Serving static file: " << filename;
 
         // Путь к веб-файлам (относительно исполняемого файла)
-        fs::path web_dir = fs::current_path() / "web" / "dist";
+        // Используем путь относительно исполняемого файла: ../web/dist
+        fs::path exe_dir = fs::current_path();
+        fs::path project_root = exe_dir.parent_path(); // Поднимаемся на уровень выше из build/
+        fs::path web_dir = project_root / "web" / "dist";
         fs::path file_path = web_dir / filename;
 
         // Проверяем безопасность пути
