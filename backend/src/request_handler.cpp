@@ -1038,7 +1038,34 @@ std::string request_handler::get_filename_from_path(const std::string& path) con
 
     VLOG(2) << "Extracted filename from path: " << path << " -> " << clean_path;
 
-    return clean_path;
+    // Декодируем URL-encoded символы (например, русские буквы)
+    std::string decoded = url_decode(clean_path);
+    VLOG(2) << "Decoded filename: " << decoded;
+    return decoded;
+}
+
+std::string request_handler::url_decode(const std::string& encoded) {
+    std::string result;
+    result.reserve(encoded.size());
+    for (size_t i = 0; i < encoded.size(); ++i) {
+        if (encoded[i] == '%' && i + 2 < encoded.size()) {
+            int hex1 = encoded[i + 1];
+            int hex2 = encoded[i + 2];
+            if (std::isxdigit(hex1) && std::isxdigit(hex2)) {
+                int value = (hex1 <= '9' ? hex1 - '0' : (hex1 <= 'F' ? hex1 - 'A' + 10 : hex1 - 'a' + 10)) * 16 +
+                            (hex2 <= '9' ? hex2 - '0' : (hex2 <= 'F' ? hex2 - 'A' + 10 : hex2 - 'a' + 10));
+                result += static_cast<char>(value);
+                i += 2;
+            } else {
+                result += encoded[i];
+            }
+        } else if (encoded[i] == '+') {
+            result += ' ';
+        } else {
+            result += encoded[i];
+        }
+    }
+    return result;
 }
 
 

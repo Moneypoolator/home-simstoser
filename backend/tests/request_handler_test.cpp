@@ -57,7 +57,7 @@ TEST_F(RequestHandlerTest, GetFilenameWithQueryParams) {
 }
 
 TEST_F(RequestHandlerTest, GetFilenameSpecialChars) {
-    EXPECT_EQ(_handler->get_filename_from_path("/file%20with%20spaces.txt"), "file%20with%20spaces.txt");
+    EXPECT_EQ(_handler->get_filename_from_path("/file%20with%20spaces.txt"), "file with spaces.txt");
     EXPECT_EQ(_handler->get_filename_from_path("/file-with-dashes.txt"), "file-with-dashes.txt");
     EXPECT_EQ(_handler->get_filename_from_path("/file_with_underscores.txt"), "file_with_underscores.txt");
 }

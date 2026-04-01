@@ -93,6 +93,9 @@ private:
     // Преобразование permission_type в строку
     static std::string permission_to_string(permission_type perm);
     
+    // URL декодирование
+    static std::string url_decode(const std::string& encoded);
+    
     // Обработчики для разных методов
     
     // Multipart upload handlers
