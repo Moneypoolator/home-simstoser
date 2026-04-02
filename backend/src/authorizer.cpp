@@ -16,7 +16,7 @@ std::optional<user> authorizer::create_user(
     const std::string& email,
     user_role role)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     // Проверяем, не существует ли уже пользователь с таким именем
     for (const auto& [id, existing_user] : _users) {
@@ -44,7 +44,7 @@ std::optional<user> authorizer::create_user(
 }
 
 std::optional<user> authorizer::get_user(const std::string& user_id) const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -55,7 +55,7 @@ std::optional<user> authorizer::get_user(const std::string& user_id) const {
 }
 
 std::optional<user> authorizer::get_user_by_name(const std::string& username) const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     for (const auto& [id, user] : _users) {
         if (user.username == username) {
@@ -67,7 +67,7 @@ std::optional<user> authorizer::get_user_by_name(const std::string& username) co
 }
 
 bool authorizer::update_user_role(const std::string& user_id, user_role new_role) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -86,7 +86,7 @@ bool authorizer::update_user_role(const std::string& user_id, user_role new_role
 }
 
 bool authorizer::activate_user(const std::string& user_id) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -99,7 +99,7 @@ bool authorizer::activate_user(const std::string& user_id) {
 }
 
 bool authorizer::deactivate_user(const std::string& user_id) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -112,7 +112,7 @@ bool authorizer::deactivate_user(const std::string& user_id) {
 }
 
 bool authorizer::delete_user(const std::string& user_id) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -127,7 +127,7 @@ bool authorizer::delete_user(const std::string& user_id) {
 }
 
 std::vector<user> authorizer::list_users() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     std::vector<user> users;
     users.reserve(_users.size());
@@ -146,7 +146,7 @@ std::optional<access_policy> authorizer::create_policy(
     const std::string& description,
     const std::vector<permission>& permissions)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     access_policy policy;
     policy.policy_id = generate_id();
@@ -163,7 +163,7 @@ std::optional<access_policy> authorizer::create_policy(
 }
 
 std::optional<access_policy> authorizer::get_policy(const std::string& policy_id) const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _policies.find(policy_id);
     if (it == _policies.end()) {
@@ -174,7 +174,7 @@ std::optional<access_policy> authorizer::get_policy(const std::string& policy_id
 }
 
 bool authorizer::delete_policy(const std::string& policy_id) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _policies.find(policy_id);
     if (it == _policies.end()) {
@@ -187,7 +187,7 @@ bool authorizer::delete_policy(const std::string& policy_id) {
 }
 
 std::vector<access_policy> authorizer::list_policies() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     std::vector<access_policy> policies;
     policies.reserve(_policies.size());
@@ -205,7 +205,7 @@ bool authorizer::set_resource_acl(
     const std::string& resource_path,
     const resource_acl& acl)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     _resource_acls[resource_path] = acl;
     
@@ -214,7 +214,7 @@ bool authorizer::set_resource_acl(
 }
 
 std::optional<resource_acl> authorizer::get_resource_acl(const std::string& resource_path) const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     // Сначала ищем точное совпадение
     auto it = _resource_acls.find(resource_path);
@@ -223,20 +223,30 @@ std::optional<resource_acl> authorizer::get_resource_acl(const std::string& reso
     }
     
     // Затем ищем ACL для родительских директорий
-    fs::path path(resource_path);
-    while (path.has_parent_path()) {
-        path = path.parent_path();
-        auto parent_it = _resource_acls.find(path.string());
+    fs::path current(resource_path);
+    VLOG(2) << "Starting parent search for path: " << resource_path;
+    while (true) {
+        fs::path parent = current.parent_path();
+        if (parent.empty() || parent == current) {
+            VLOG(2) << "Reached root or same path, stopping";
+            break;
+        }
+        current = parent;
+        std::string current_str = current.string();
+        VLOG(2) << "Checking parent path: " << current_str;
+        auto parent_it = _resource_acls.find(current_str);
         if (parent_it != _resource_acls.end()) {
+            VLOG(2) << "Found ACL for parent: " << current_str;
             return parent_it->second;
         }
     }
+    VLOG(2) << "No parent ACL found";
     
     return std::nullopt;
 }
 
 bool authorizer::remove_resource_acl(const std::string& resource_path) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _resource_acls.find(resource_path);
     if (it == _resource_acls.end()) {
@@ -249,7 +259,7 @@ bool authorizer::remove_resource_acl(const std::string& resource_path) {
 }
 
 bool authorizer::make_resource_public(const std::string& resource_path) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_it = _resource_acls.find(resource_path);
     if (acl_it == _resource_acls.end()) {
@@ -266,7 +276,7 @@ bool authorizer::make_resource_public(const std::string& resource_path) {
 }
 
 bool authorizer::make_resource_private(const std::string& resource_path) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_it = _resource_acls.find(resource_path);
     if (acl_it == _resource_acls.end()) {
@@ -287,7 +297,7 @@ bool authorizer::add_user_permission(
     const std::string& user_id,
     permission_type perm)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_it = _resource_acls.find(resource_path);
     if (acl_it == _resource_acls.end()) {
@@ -311,7 +321,7 @@ bool authorizer::remove_user_permission(
     const std::string& user_id,
     permission_type perm)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_it = _resource_acls.find(resource_path);
     if (acl_it == _resource_acls.end()) {
@@ -323,14 +333,17 @@ bool authorizer::remove_user_permission(
         return false;
     }
     
-    user_it->second.erase(perm);
+    size_t erased = user_it->second.erase(perm);
+    if (erased == 0) {
+        return false;
+    }
     
     if (user_it->second.empty()) {
         acl_it->second.user_permissions.erase(user_it);
     }
     
-    LOG(INFO) << "Removed permission for user " << user_id 
-              << " on resource " << resource_path 
+    LOG(INFO) << "Removed permission for user " << user_id
+              << " on resource " << resource_path
               << ": " << permission_to_string(perm);
     
     return true;
@@ -341,7 +354,7 @@ bool authorizer::add_group_permission(
     const std::string& group_name,
     permission_type perm)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_it = _resource_acls.find(resource_path);
     if (acl_it == _resource_acls.end()) {
@@ -367,7 +380,7 @@ bool authorizer::check_access(
     const std::string& resource_path,
     permission_type required_permission) const
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     // Получаем пользователя
     auto user_it = _users.find(user_id);
@@ -435,7 +448,7 @@ bool authorizer::check_public_access(
     const std::string& resource_path,
     permission_type required_permission) const
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     // Проверяем, есть ли публичный доступ к ресурсу
     auto acl_opt = get_resource_acl(resource_path);
@@ -454,7 +467,7 @@ bool authorizer::check_public_access(
 }
 
 bool authorizer::is_admin(const std::string& user_id) const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto it = _users.find(user_id);
     if (it == _users.end()) {
@@ -468,7 +481,7 @@ bool authorizer::is_resource_owner(
     const std::string& user_id,
     const std::string& resource_path) const
 {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     
     auto acl_opt = get_resource_acl(resource_path);
     if (!acl_opt) {

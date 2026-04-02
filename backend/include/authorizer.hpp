@@ -197,7 +197,7 @@ public:
     static bool matches_pattern(const std::string& path, const std::string& pattern);
     
 private:
-    mutable std::mutex _mutex;
+    mutable std::recursive_mutex _mutex;
     std::map<std::string, user> _users;
     std::map<std::string, access_policy> _policies;
     std::map<std::string, resource_acl> _resource_acls;

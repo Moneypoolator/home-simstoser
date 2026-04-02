@@ -10,6 +10,7 @@ add_executable(unit_tests
     file_manager_test.cpp
     request_handler_test.cpp
     authenticator_test.cpp
+    authorizer_test.cpp
     ../src/file_manager.cpp
     ../src/request_handler.cpp
     ../src/authenticator.cpp
