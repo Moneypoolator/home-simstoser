@@ -5,6 +5,7 @@
 #include <random>
 #include <algorithm>
 #include <ctime>
+#include <set>
 #include <glog/logging.h>
 #include "logging.hpp"
 
@@ -181,13 +182,40 @@ bool authenticator::verify_signature(
     
     std::string date_stamp = parsed->credential_scope.substr(0, date_pos);
     
+    // Фильтруем заголовки: оставляем только те, что указаны в SignedHeaders
+    std::map<std::string, std::string> filtered_headers;
+    std::string signed_headers_str = parsed->signed_headers;
+    std::set<std::string> signed_headers_set;
+    
+    // Разделяем SignedHeaders по точке с запятой
+    size_t start = 0;
+    size_t end = signed_headers_str.find(';');
+    while (end != std::string::npos) {
+        std::string header_name = signed_headers_str.substr(start, end - start);
+        signed_headers_set.insert(header_name);
+        start = end + 1;
+        end = signed_headers_str.find(';', start);
+    }
+    // Последний элемент
+    if (start < signed_headers_str.length()) {
+        std::string header_name = signed_headers_str.substr(start);
+        signed_headers_set.insert(header_name);
+    }
+    
+    // Добавляем только те заголовки, которые есть в signed_headers_set
+    for (const auto& [name, value] : headers) {
+        if (signed_headers_set.find(name) != signed_headers_set.end()) {
+            filtered_headers[name] = value;
+        }
+    }
+    
     // Генерируем ожидаемую подпись
     std::string expected_signature = generate_signature(
         parsed->access_key_id,
         key_opt->secret_access_key,
         method,
         uri,
-        headers,
+        filtered_headers,
         body,
         region,
         service
@@ -239,17 +267,82 @@ std::string authenticator::generate_signature(
     const std::string& region,
     const std::string& service) const
 {
-    // Этот метод используется для генерации подписи (для клиентов)
-    // Для сервера используется только проверка (verify_signature)
+    // 1. Extract timestamp from headers (x-amz-date or date)
+    auto timestamp_opt = get_timestamp(headers);
+    if (!timestamp_opt) {
+        LOG(WARNING) << "No timestamp found in headers";
+        return "";
+    }
+    std::string timestamp = *timestamp_opt;
+    // date_stamp is YYYYMMDD part of timestamp (first 8 chars)
+    std::string date_stamp = timestamp.substr(0, 8);
     
-    // 1. Создаем канонический запрос
-    // 2. Создаем строку для подписи
-    // 3. Вычисляем подпись
+    // 2. Prepare canonical headers
+    std::map<std::string, std::string> canonical_headers_map;
+    for (const auto& [name, value] : headers) {
+        // Skip headers that are not part of the signature (like Authorization)
+        if (name == "authorization") continue;
+        canonical_headers_map[name] = value;
+    }
+    // Ensure host header is present (required by AWS)
+    if (canonical_headers_map.find("host") == canonical_headers_map.end()) {
+        // If host not provided, we cannot sign properly
+        LOG(WARNING) << "Host header missing";
+        return "";
+    }
     
-    // TODO: Полная реализация генерации подписи
-    // Для сервера это не обязательно, но полезно для тестирования
+    // Sort headers by name
+    std::vector<std::string> sorted_header_names;
+    for (const auto& [name, _] : canonical_headers_map) {
+        sorted_header_names.push_back(name);
+    }
+    std::sort(sorted_header_names.begin(), sorted_header_names.end());
     
-    return "";
+    // Build canonical headers string
+    std::string canonical_headers;
+    for (const auto& name : sorted_header_names) {
+        canonical_headers += name + ":" + canonical_headers_map[name] + "\n";
+    }
+    
+    // Signed headers list
+    std::string signed_headers;
+    for (size_t i = 0; i < sorted_header_names.size(); ++i) {
+        if (i > 0) signed_headers += ";";
+        signed_headers += sorted_header_names[i];
+    }
+    
+    // 3. Hash the request body
+    std::string payload_hash = sha256_hex(body);
+    
+    // 4. Build canonical request
+    std::string canonical_request = method + "\n"
+                                  + uri + "\n"
+                                  + "" + "\n"  // canonical query string (empty)
+                                  + canonical_headers + "\n"
+                                  + signed_headers + "\n"
+                                  + payload_hash;
+    
+    // 5. Create string to sign
+    std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
+    std::string string_to_sign = "AWS4-HMAC-SHA256\n"
+                               + timestamp + "\n"
+                               + credential_scope + "\n"
+                               + sha256_hex(canonical_request);
+    
+    // DEBUG: Log canonical request and string to sign when environment variable is set
+    const char* debug_env = std::getenv("DEBUG_AUTH");
+    if (debug_env && std::string(debug_env) == "1") {
+        LOG(INFO) << "Canonical request:\n" << canonical_request;
+        LOG(INFO) << "String to sign:\n" << string_to_sign;
+    }
+    
+    // 6. Compute signing key
+    std::string signing_key = get_signature_key(secret_key, date_stamp, region, service);
+    
+    // 7. Compute signature
+    std::string signature = hmac_sha256_hex(signing_key, string_to_sign);
+    
+    return signature;
 }
 
 // ========== AWS Signature Version 4 Implementation ==========

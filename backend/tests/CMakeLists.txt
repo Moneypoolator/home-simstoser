@@ -9,6 +9,7 @@ include_directories(
 add_executable(unit_tests
     file_manager_test.cpp
     request_handler_test.cpp
+    authenticator_test.cpp
     ../src/file_manager.cpp
     ../src/request_handler.cpp
     ../src/authenticator.cpp
@@ -25,6 +26,9 @@ target_link_libraries(unit_tests
     Threads::Threads
     nlohmann_json::nlohmann_json
 )
+
+# Prevent linker from discarding test registration symbols
+target_link_options(unit_tests PRIVATE -Wl,--no-gc-sections)
 
 # Проверка поддержки filesystem (повторяем логику из корневого CMakeLists.txt)
 include(CheckIncludeFileCXX)

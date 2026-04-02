@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 #include "test_http_client.hpp"
 #include "server.hpp"
+#include "authenticator.hpp"
 #include <thread>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 
@@ -52,6 +54,126 @@ protected:
     std::unique_ptr<test_http_client> _client;
     fs::path _temp_dir;
     unsigned short _port;
+};
+
+// Helper function to send HTTP request with custom headers
+static http_response send_request_with_headers(
+    const std::string& host,
+    unsigned short port,
+    http::verb method,
+    const std::string& path,
+    const std::string& body = "",
+    const std::map<std::string, std::string>& extra_headers = {})
+{
+    try {
+        asio::io_context io_context;
+        
+        tcp::resolver resolver(io_context);
+        auto endpoints = resolver.resolve(host, std::to_string(port));
+        
+        beast::tcp_stream stream(io_context);
+        stream.connect(endpoints);
+        
+        http::request<http::string_body> req{method, path, 11};
+        req.set(http::field::host, host);
+        req.set(http::field::user_agent, "S3-Test-Client");
+        req.set(http::field::content_type, "application/octet-stream");
+        
+        for (const auto& [name, value] : extra_headers) {
+            req.set(name, value);
+        }
+        
+        if (!body.empty()) {
+            req.body() = body;
+            req.prepare_payload();
+        }
+        
+        http::write(stream, req);
+        
+        beast::flat_buffer buffer;
+        http::response<http::string_body> res;
+        http::read(stream, buffer, res);
+        
+        stream.socket().shutdown(tcp::socket::shutdown_both);
+        
+        http_response response;
+        response.status_code = static_cast<unsigned int>(res.result_int());
+        response.body = res.body();
+        
+        for (const auto& field : res.base()) {
+            response.headers[field.name_string()] = field.value();
+        }
+        
+        return response;
+    } catch (const std::exception& e) {
+        http_response error_response;
+        error_response.status_code = 0;
+        error_response.body = e.what();
+        return error_response;
+    }
+}
+
+class ServerAuthenticationIntegrationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Create temporary directory
+        _temp_dir = fs::temp_directory_path() / "s3_auth_integration_test";
+        fs::create_directories(_temp_dir);
+        
+        // Create temporary keys CSV file
+        _keys_file = _temp_dir / "access_keys.csv";
+        std::ofstream keys_file(_keys_file);
+        keys_file << "access_key_id,secret_access_key,user_name,is_active,created_at\n";
+        keys_file << "AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY,testuser,true,2024-01-01T00:00:00Z\n";
+        keys_file << "AKIAINACTIVEKEY,wJalrXUtnFEMI/K7MDENG/bPxRfiCYINACTIVE,inactiveuser,false,2024-01-01T00:00:00Z\n";
+        keys_file.close();
+        
+        // Generate random port
+        _port = 9000 + (std::hash<std::thread::id>{}(std::this_thread::get_id()) % 1000);
+        
+        // Create and start server with keys file
+        _server = std::make_unique<s3_server>("127.0.0.1", _port, _temp_dir.string(), _keys_file.string());
+        
+        std::thread server_thread([this]() {
+            _server->run(1);
+        });
+        _server_thread = std::move(server_thread);
+        
+        // Wait for server to start
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        _host = "127.0.0.1";
+    }
+    
+    void TearDown() override {
+        // Stop server
+        _server->stop();
+        
+        if (_server_thread.joinable()) {
+            _server_thread.join();
+        }
+        
+        // Remove temporary directory
+        if (fs::exists(_temp_dir)) {
+            fs::remove_all(_temp_dir);
+        }
+    }
+    
+    http_response send_authenticated_request(
+        http::verb method,
+        const std::string& path,
+        const std::string& body = "",
+        const std::map<std::string, std::string>& extra_headers = {})
+    {
+        return send_request_with_headers(_host, _port, method, path, body, extra_headers);
+    }
+    
+    std::unique_ptr<s3_server> _server;
+    std::thread _server_thread;
+    fs::path _temp_dir;
+    fs::path _keys_file;
+    unsigned short _port;
+    std::string _host;
 };
 
 TEST_F(ServerIntegrationTest, ServerStartsSuccessfully) {
@@ -282,4 +404,114 @@ TEST_F(ServerIntegrationTest, CORSHeaders) {
     // Assert - CORS headers should be present
     EXPECT_NE(response.headers.find("Access-Control-Allow-Origin"), response.headers.end());
     EXPECT_EQ(response.headers.at("Access-Control-Allow-Origin"), "*");
+}
+
+// Authentication integration tests
+TEST_F(ServerAuthenticationIntegrationTest, AuthenticationRequired) {
+    // Request without Authorization header should be rejected
+    auto response = send_authenticated_request(http::verb::get, "/list");
+    EXPECT_EQ(response.status_code, 401); // Unauthorized
+    EXPECT_NE(response.body.find("Error"), std::string::npos);
+}
+
+TEST_F(ServerAuthenticationIntegrationTest, InvalidSignature) {
+    // Request with malformed Authorization header
+    std::map<std::string, std::string> headers = {
+        {"Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=invalid_signature"},
+        {"x-amz-date", "20240101T120000Z"}
+    };
+    auto response = send_authenticated_request(http::verb::get, "/list", "", headers);
+    EXPECT_EQ(response.status_code, 401);
+    EXPECT_NE(response.body.find("Error"), std::string::npos);
+}
+
+TEST_F(ServerAuthenticationIntegrationTest, InactiveKey) {
+    // Request with inactive key (is_active=false)
+    std::map<std::string, std::string> headers = {
+        {"Authorization", "AWS4-HMAC-SHA256 Credential=AKIAINACTIVEKEY/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=some_signature"},
+        {"x-amz-date", "20240101T120000Z"}
+    };
+    auto response = send_authenticated_request(http::verb::get, "/list", "", headers);
+    EXPECT_EQ(response.status_code, 401);
+    EXPECT_NE(response.body.find("Error"), std::string::npos);
+}
+
+TEST_F(ServerAuthenticationIntegrationTest, MissingTimestamp) {
+    // Request without x-amz-date header
+    std::map<std::string, std::string> headers = {
+        {"Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=some_signature"}
+    };
+    auto response = send_authenticated_request(http::verb::get, "/list", "", headers);
+    EXPECT_EQ(response.status_code, 401);
+    EXPECT_NE(response.body.find("Error"), std::string::npos);
+}
+
+TEST_F(ServerAuthenticationIntegrationTest, ValidSignature) {
+    // Create an authenticator instance to generate signature
+    authenticator auth;
+    
+    // Load the same keys file as the server
+    ASSERT_TRUE(auth.load_keys(_keys_file.string()));
+    
+    // Get the active key
+    auto key_opt = auth.get_key("AKIAIOSFODNN7EXAMPLE");
+    ASSERT_TRUE(key_opt.has_value());
+    auto& key = key_opt.value();
+    
+    // Prepare request parameters
+    std::string method = "GET";
+    std::string uri = "/list";
+    std::string body = "";
+    std::string region = "us-east-1";
+    std::string service = "s3";
+    
+    // Generate current timestamp in AWS format
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    gmtime_r(&now_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    // Headers that will be signed (must include host and x-amz-date)
+    std::map<std::string, std::string> headers = {
+        {"host", _host + ":" + std::to_string(_port)},
+        {"x-amz-date", timestamp}
+    };
+    
+    // Generate signature
+    std::string signature = auth.generate_signature(
+        key.access_key_id,
+        key.secret_access_key,
+        method,
+        uri,
+        headers,
+        body,
+        region,
+        service
+    );
+    
+    // Debug output
+    std::cout << "DEBUG: timestamp = " << timestamp << std::endl;
+    std::cout << "DEBUG: host header = " << headers.at("host") << std::endl;
+    std::cout << "DEBUG: signature = " << signature << std::endl;
+    
+    // Ensure signature is not empty (generation succeeded)
+    ASSERT_FALSE(signature.empty());
+    
+    // Build Authorization header
+    std::string date_stamp = std::string(timestamp, 8);
+    std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
+    std::string authorization_header =
+        "AWS4-HMAC-SHA256 Credential=" + key.access_key_id + "/" + credential_scope +
+        ", SignedHeaders=host;x-amz-date" +
+        ", Signature=" + signature;
+    
+    headers["authorization"] = authorization_header;
+    
+    // Send request
+    auto response = send_authenticated_request(http::verb::get, "/list", "", headers);
+    
+    // Expect success (200 OK)
+    EXPECT_EQ(response.status_code, 200);
 }
