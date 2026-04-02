@@ -629,3 +629,230 @@ void file_manager::cleanup_upload(const std::string& upload_id)
     // Удаляем из активных загрузок
     _active_uploads.erase(upload_id);
 }
+
+// ========== СТРИМИНГОВАЯ ЗАГРУЗКА ==========
+
+std::optional<std::string> file_manager::initiate_stream_upload(const std::string& filename)
+{
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
+        return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    // Генерируем уникальный ID загрузки
+    std::string stream_id = generate_upload_id();
+    
+    // Создаем временный файл для записи
+    fs::path temp_dir = _storage_dir / ".stream_uploads";
+    fs::create_directories(temp_dir);
+    
+    fs::path temp_file = temp_dir / stream_id;
+    
+    // Создаем пустой временный файл
+    try {
+        std::ofstream empty_file(temp_file, std::ios::binary | std::ios::trunc);
+        if (!empty_file) {
+            LOG(ERROR) << "Failed to create temporary file for stream: " << temp_file.string();
+            return std::nullopt;
+        }
+        empty_file.close();
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception creating temporary file: " << e.what();
+        return std::nullopt;
+    }
+    
+    // Создаем запись о стриминговой загрузке
+    stream_upload upload;
+    upload.stream_id = stream_id;
+    upload.filename = filename;
+    upload.temp_file = temp_file;
+    upload.bytes_written = 0;
+    upload.initiated_at = std::chrono::system_clock::now();
+    upload.completed = false;
+    
+    _active_stream_uploads[stream_id] = std::move(upload);
+    
+    LOG(INFO) << "Stream upload initiated: " << filename << " (ID: " << stream_id << ")";
+    return stream_id;
+}
+
+bool file_manager::write_to_stream(
+    const std::string& stream_id,
+    const std::vector<char>& data)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    auto upload_it = _active_stream_uploads.find(stream_id);
+    if (upload_it == _active_stream_uploads.end()) {
+        LOG(WARNING) << "Stream upload not found: " << stream_id;
+        return false;
+    }
+    
+    stream_upload& upload = upload_it->second;
+    
+    if (upload.completed) {
+        LOG(WARNING) << "Attempt to write to completed stream: " << stream_id;
+        return false;
+    }
+    
+    try {
+        // Открываем файл в режиме добавления (append)
+        std::ofstream file(upload.temp_file, std::ios::binary | std::ios::app);
+        if (!file) {
+            LOG(ERROR) << "Failed to open stream file for writing: " << upload.temp_file.string();
+            return false;
+        }
+        
+        file.write(data.data(), static_cast<std::streamsize>(data.size()));
+        file.close();
+        
+        if (file.good()) {
+            upload.bytes_written += data.size();
+            VLOG(2) << "Written " << data.size() << " bytes to stream " << stream_id
+                    << " (total: " << upload.bytes_written << " bytes)";
+            return true;
+        } else {
+            LOG(ERROR) << "Failed to write to stream: " << stream_id;
+            return false;
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during stream write: " << stream_id << " - " << e.what();
+        return false;
+    }
+}
+
+bool file_manager::complete_stream_upload(const std::string& stream_id)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    auto upload_it = _active_stream_uploads.find(stream_id);
+    if (upload_it == _active_stream_uploads.end()) {
+        LOG(WARNING) << "Stream upload not found: " << stream_id;
+        return false;
+    }
+    
+    stream_upload& upload = upload_it->second;
+    
+    if (upload.completed) {
+        LOG(WARNING) << "Stream upload already completed: " << stream_id;
+        return false;
+    }
+    
+    if (!is_path_safe(upload.filename)) {
+        LOG(WARNING) << "Unsafe filename in stream upload: " << upload.filename;
+        return false;
+    }
+    
+    try {
+        fs::path final_path = _storage_dir / upload.filename;
+        
+        // Создаем родительские директории, если нужно
+        fs::create_directories(final_path.parent_path());
+        
+        // Перемещаем временный файл в финальное расположение
+        fs::rename(upload.temp_file, final_path);
+        
+        upload.completed = true;
+        
+        LOG(INFO) << "Stream upload completed: " << upload.filename
+                  << " (ID: " << stream_id << ", size: " << upload.bytes_written << " bytes)";
+        logging::log_file_operation("STREAM_UPLOAD", upload.filename, upload.bytes_written);
+        
+        // Удаляем из активных загрузок
+        _active_stream_uploads.erase(upload_it);
+        
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during stream completion: " << stream_id << " - " << e.what();
+        return false;
+    }
+}
+
+bool file_manager::abort_stream_upload(const std::string& stream_id)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    auto upload_it = _active_stream_uploads.find(stream_id);
+    if (upload_it == _active_stream_uploads.end()) {
+        VLOG(2) << "Stream upload not found for abort: " << stream_id;
+        return false;
+    }
+    
+    stream_upload& upload = upload_it->second;
+    
+    try {
+        // Удаляем временный файл
+        if (fs::exists(upload.temp_file)) {
+            fs::remove(upload.temp_file);
+        }
+        
+        LOG(INFO) << "Stream upload aborted: " << upload.filename
+                  << " (ID: " << stream_id << ", written: " << upload.bytes_written << " bytes)";
+        
+        // Удаляем из активных загрузок
+        _active_stream_uploads.erase(upload_it);
+        
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during stream abort: " << stream_id << " - " << e.what();
+        return false;
+    }
+}
+
+std::optional<std::uintmax_t> file_manager::get_stream_upload_progress(const std::string& stream_id) const
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    auto upload_it = _active_stream_uploads.find(stream_id);
+    if (upload_it == _active_stream_uploads.end()) {
+        VLOG(2) << "Stream upload not found for progress: " << stream_id;
+        return std::nullopt;
+    }
+    
+    const stream_upload& upload = upload_it->second;
+    return upload.bytes_written;
+}
+
+std::optional<stream_upload*> file_manager::get_stream_upload(const std::string& stream_id)
+{
+    auto it = _active_stream_uploads.find(stream_id);
+    if (it == _active_stream_uploads.end()) {
+        return std::nullopt;
+    }
+    return &it->second;
+}
+
+std::optional<const stream_upload*> file_manager::get_stream_upload(const std::string& stream_id) const
+{
+    auto it = _active_stream_uploads.find(stream_id);
+    if (it == _active_stream_uploads.end()) {
+        return std::nullopt;
+    }
+    return &it->second;
+}
+
+void file_manager::cleanup_stream_upload(const std::string& stream_id)
+{
+    auto upload_opt = get_stream_upload(stream_id);
+    if (!upload_opt) {
+        VLOG(2) << "Cleanup requested for non-existent stream upload: " << stream_id;
+        return;
+    }
+    
+    const stream_upload* upload = *upload_opt;
+    
+    // Удаляем временный файл
+    try {
+        if (fs::exists(upload->temp_file)) {
+            fs::remove(upload->temp_file);
+            VLOG(2) << "Stream upload cleanup completed: " << stream_id;
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception during stream upload cleanup: " << stream_id << " - " << e.what();
+    }
+    
+    // Удаляем из активных загрузок
+    _active_stream_uploads.erase(stream_id);
+}

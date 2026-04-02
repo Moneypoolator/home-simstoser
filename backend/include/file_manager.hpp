@@ -29,6 +29,16 @@ struct multipart_upload {
     bool completed = false;
 };
 
+// Метаданные для стриминговой загрузки
+struct stream_upload {
+    std::string stream_id;
+    std::string filename;
+    fs::path temp_file;
+    std::uintmax_t bytes_written = 0;
+    std::chrono::system_clock::time_point initiated_at;
+    bool completed = false;
+};
+
 class file_manager {
 public:
     explicit file_manager(const std::string& storage_path);
@@ -77,12 +87,33 @@ public:
     // Очистить старые загрузки (старше указанного времени)
     void cleanup_old_uploads(std::chrono::hours max_age = std::chrono::hours(24));
 
+    // ========== СТРИМИНГОВАЯ ЗАГРУЗКА ==========
+    
+    // Инициировать стриминговую загрузку файла
+    std::optional<std::string> initiate_stream_upload(const std::string& filename);
+    
+    // Записать данные в стрим
+    bool write_to_stream(
+        const std::string& stream_id,
+        const std::vector<char>& data
+    );
+    
+    // Завершить стриминговую загрузку
+    bool complete_stream_upload(const std::string& stream_id);
+    
+    // Отменить стриминговую загрузку
+    bool abort_stream_upload(const std::string& stream_id);
+    
+    // Получить прогресс стриминговой загрузки (размер записанных данных)
+    std::optional<std::uintmax_t> get_stream_upload_progress(const std::string& stream_id) const;
+
     static bool is_path_safe(const fs::path& storage_dir, const std::string& filename);
 
 private:
     fs::path _storage_dir;
     mutable std::mutex _mutex;
     std::map<std::string, multipart_upload> _active_uploads;
+    std::map<std::string, stream_upload> _active_stream_uploads;
     
    // Вычисление ETag из данных
     std::string compute_etag(const std::vector<char>& data) const;
@@ -106,4 +137,13 @@ private:
     
     // Удаление временных файлов загрузки
     void cleanup_upload(const std::string& upload_id);
+    
+    // ========== СТРИМИНГОВАЯ ЗАГРУЗКА (приватные методы) ==========
+    
+    // Получение стриминговой загрузки
+    std::optional<stream_upload*> get_stream_upload(const std::string& stream_id);
+    std::optional<const stream_upload*> get_stream_upload(const std::string& stream_id) const;
+    
+    // Очистка стриминговой загрузки
+    void cleanup_stream_upload(const std::string& stream_id);
 };
