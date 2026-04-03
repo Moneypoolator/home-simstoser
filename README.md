@@ -187,9 +187,10 @@ This starts the server with default settings:
 | `--keys` | `-k` | Access keys file (CSV format) | `./access_keys.csv` |
 | `--users` | `-u` | Users file (CSV format) | `./users.csv` |
 | `--no-auth` | | Disable authentication (allows anonymous access) | `false` |
-| `--ssl` | `-S` | Enable SSL/TLS (HTTPS) | `false` |
-| `--cert` | | SSL certificate file (required for SSL) | `./certs/server.crt` |
-| `--key` | | SSL private key file (required for SSL) | `./certs/server.key` |
+| `--ssl` | `-S` | Enable SSL/TLS (HTTPS) with self-signed certificate | `false` |
+| `--letsencrypt`, `-L` | | Use Let's Encrypt certificates from directory | (none) |
+| `--cert` | | SSL certificate file (alternative to --letsencrypt) | `./certs/server.crt` |
+| `--key` | | SSL private key file (alternative to --letsencrypt) | `./certs/server.key` |
 | `--log-level` | `-l` | Log verbosity level (0-4) | `0` |
 | `--log-dir` | | Directory for log files | (current directory) |
 | `--help` | `-h` | Show help message | - |
@@ -202,13 +203,25 @@ This starts the server with default settings:
    ./s3_server --port 8080 --storage /mnt/data/storage
    ```
 
-2. **Run with HTTPS (SSL/TLS):**
+2. **Run with HTTPS (SSL/TLS) - Self-signed certificate:**
 
    ```bash
    ./s3_server --ssl --cert ./certs/server.crt --key ./certs/server.key
    ```
 
-   *Note: The server will automatically generate self-signed certificates if they don't exist.*
+   *Note: The server will automatically generate and renew self-signed certificates if they don't exist or are expiring soon.*
+
+3. **Run with HTTPS (SSL/TLS) - Let's Encrypt certificate:**
+
+   ```bash
+   # Using default Let's Encrypt directory (/etc/letsencrypt/live/<domain>)
+   ./s3_server --letsencrypt /etc/letsencrypt/live/example.com
+   
+   # Or with short option
+   ./s3_server -L /etc/letsencrypt/live/example.com
+   ```
+
+   *Note: Let's Encrypt certificates must be obtained separately using certbot. The server will check certificate expiration and warn if renewal is needed.*
 
 3. **Run without authentication (development mode):**
 
@@ -349,7 +362,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [x] Path traversal protection
 - [x] AWS Signature Version 4 authentication
 - [x] Role-based access control (RBAC) with user management
-- [ ] HTTPS/SSL support with automatic certificate generation
+- [x] HTTPS/SSL support with automatic certificate generation
 - [ ] Rate limiting and DDoS protection
 
 ### Phase 2: Enhanced Features & Performance
@@ -396,7 +409,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 ### Current Known Issues & Limitations
 
 - **Authentication**: AWS Signature Version 4 is implemented but requires proper key management
-- **HTTPS/SSL**: SSL/TLS support is available but requires manual certificate configuration (no automatic Let's Encrypt integration)
+- **HTTPS/SSL**: SSL/TLS support with automatic self-signed certificate generation and Let's Encrypt integration
 - **Error Handling**: Basic error handling is implemented; some edge cases may need improvement
 - **File Size Validation**: No built-in file size limits or quota management
 - **Temporary Files**: Multipart and stream uploads create temporary files that are cleaned up on completion/abort, but orphaned files may accumulate on unexpected crashes

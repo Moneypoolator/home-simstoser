@@ -4,6 +4,9 @@
 #include <csignal>
 #include <atomic>
 #include <filesystem>
+#include <ctime>
+#include <cstdio>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -41,8 +44,85 @@ void generate_self_signed_cert(const std::string& cert_file, const std::string& 
         LOG(INFO) << "Private key: " << key_file;
     } else {
         LOG(WARNING) << "Failed to generate self-signed certificate. Please create manually.";
-        LOG(INFO) << "Use: openssl req -x509 -newkey rsa:4096 -keyout " << key_file 
+        LOG(INFO) << "Use: openssl req -x509 -newkey rsa:4096 -keyout " << key_file
                   << " -out " << cert_file << " -days 365 -nodes -subj \"/CN=localhost\"";
+    }
+}
+
+// Check if certificate is expired or about to expire (within 30 days)
+bool is_certificate_expiring_soon(const std::string& cert_file, int days_threshold = 30)
+{
+    if (!fs::exists(cert_file)) {
+        return true; // Certificate doesn't exist, needs generation
+    }
+    
+    // Use OpenSSL to check certificate expiration
+    std::string cmd = "openssl x509 -enddate -noout -in " + cert_file + " 2>/dev/null";
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        LOG(WARNING) << "Failed to check certificate expiration";
+        return false;
+    }
+    
+    char buffer[256];
+    std::string result;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result += buffer;
+    }
+    pclose(pipe);
+    
+    // Parse the date from output like "notAfter=Dec 31 23:59:59 2025 GMT"
+    size_t pos = result.find("notAfter=");
+    if (pos == std::string::npos) {
+        LOG(WARNING) << "Failed to parse certificate expiration date";
+        return false;
+    }
+    
+    std::string date_str = result.substr(pos + 9); // Skip "notAfter="
+    // Remove trailing newline
+    date_str.erase(std::remove(date_str.begin(), date_str.end(), '\n'), date_str.end());
+    
+    // Convert date string to time_t
+    std::tm tm = {};
+    strptime(date_str.c_str(), "%b %d %H:%M:%S %Y GMT", &tm);
+    std::time_t expiration_time = std::mktime(&tm);
+    
+    // Get current time
+    std::time_t current_time = std::time(nullptr);
+    
+    // Calculate days until expiration
+    double seconds_until_expiration = std::difftime(expiration_time, current_time);
+    int days_until_expiration = static_cast<int>(seconds_until_expiration / (60 * 60 * 24));
+    
+    LOG(INFO) << "Certificate expires in " << days_until_expiration << " days";
+    
+    return days_until_expiration <= days_threshold;
+}
+
+// Renew certificate if it's expiring soon
+void renew_certificate_if_needed(const std::string& cert_file, const std::string& key_file, int days_threshold = 30)
+{
+    if (is_certificate_expiring_soon(cert_file, days_threshold)) {
+        LOG(INFO) << "Certificate is expiring soon or doesn't exist, renewing...";
+        
+        // Backup old certificate files
+        std::string backup_cert = cert_file + ".backup";
+        std::string backup_key = key_file + ".backup";
+        
+        if (fs::exists(cert_file)) {
+            fs::copy_file(cert_file, backup_cert, fs::copy_options::overwrite_existing);
+        }
+        if (fs::exists(key_file)) {
+            fs::copy_file(key_file, backup_key, fs::copy_options::overwrite_existing);
+        }
+        
+        // Generate new certificate
+        generate_self_signed_cert(cert_file, key_file);
+        
+        LOG(INFO) << "Certificate renewed successfully";
+    } else {
+        LOG(INFO) << "Certificate is still valid, no renewal needed";
     }
 }
 
@@ -65,8 +145,10 @@ int main(int argc, char* argv[])
     bool enable_ssl = false;
     
     bool use_ssl = false;
+    bool use_letsencrypt = false;
     std::string cert_file = "./certs/server.crt";
     std::string key_file = "./certs/server.key";
+    std::string letsencrypt_dir = "";
     
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
@@ -100,6 +182,12 @@ int main(int argc, char* argv[])
         else if (arg == "--key") {
             if (i + 1 < argc) key_file = argv[++i];
         }
+        else if (arg == "--letsencrypt" || arg == "-L") {
+            use_letsencrypt = true;
+            use_ssl = true;
+            enable_ssl = true;
+            if (i + 1 < argc) letsencrypt_dir = argv[++i];
+        }
         else if (arg == "--log-level" || arg == "-l") {
             if (i + 1 < argc) {
                 int vlevel = std::stoi(argv[++i]);
@@ -121,7 +209,7 @@ int main(int argc, char* argv[])
                       << "  -u, --users <file>     Users file (default: ./users.json)\n"
                       << "      --no-auth          Disable authentication\n"
                       << "      --ssl              Enable SSL/TLS\n"
-                      
+                      << "      --letsencrypt, -L <dir> Use Let's Encrypt certificates from directory\n"
                       << "      --cert <file>      SSL certificate file\n"
                       << "      --key <file>       SSL private key file\n"
                       << "  -h, --help             Show this help message\n";
@@ -144,8 +232,39 @@ int main(int argc, char* argv[])
         std::optional<s3_server::ssl_config> ssl_cfg;
         
         if (use_ssl) {
-            // Генерируем самоподписанный сертификат, если файлы не существуют
-            generate_self_signed_cert(cert_file, key_file);
+            if (use_letsencrypt) {
+                // Use Let's Encrypt certificate paths
+                if (letsencrypt_dir.empty()) {
+                    // Default Let's Encrypt directory
+                    letsencrypt_dir = "/etc/letsencrypt/live/" + address;
+                }
+                
+                std::string le_cert = letsencrypt_dir + "/fullchain.pem";
+                std::string le_key = letsencrypt_dir + "/privkey.pem";
+                
+                // Check if Let's Encrypt certificates exist
+                if (!fs::exists(le_cert) || !fs::exists(le_key)) {
+                    LOG(FATAL) << "Let's Encrypt certificates not found in: " << letsencrypt_dir;
+                    LOG(FATAL) << "Expected files: " << le_cert << " and " << le_key;
+                    LOG(FATAL) << "Please run certbot to obtain certificates first";
+                    logging::shutdown();
+                    return 1;
+                }
+                
+                cert_file = le_cert;
+                key_file = le_key;
+                
+                LOG(INFO) << "Using Let's Encrypt certificates from: " << letsencrypt_dir;
+                
+                // Check Let's Encrypt certificate expiration (warn if < 7 days)
+                if (is_certificate_expiring_soon(cert_file, 7)) {
+                    LOG(WARNING) << "Let's Encrypt certificate is expiring soon!";
+                    LOG(WARNING) << "Run 'certbot renew' to renew certificates";
+                }
+            } else {
+                // Check and renew self-signed certificate if needed (expiring within 30 days)
+                renew_certificate_if_needed(cert_file, key_file, 30);
+            }
             
             // Проверяем существование файлов сертификата
             if (!fs::exists(cert_file) || !fs::exists(key_file)) {
@@ -178,7 +297,11 @@ int main(int argc, char* argv[])
             std::cout << "Authorization: ENABLED (users: " << users_file << ")" << std::endl;
         }
         if (use_ssl) {
-            std::cout << "Certificate: " << cert_file << std::endl;
+            if (use_letsencrypt) {
+                std::cout << "Certificate: Let's Encrypt (" << cert_file << ")" << std::endl;
+            } else {
+                std::cout << "Certificate: Self-signed (" << cert_file << ")" << std::endl;
+            }
         }
         std::cout << "Press Ctrl+C to stop" << std::endl;
         std::cout << "========================================\n" << std::endl;
