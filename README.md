@@ -12,7 +12,7 @@ Home S3 Storage is a self-hosted file storage solution that implements basic Ama
 - **Modern Web Interface**: React-based dashboard for file management with drag-and-drop uploads
 - **High Performance**: Built with C++20 and Boost.Beast for efficient asynchronous I/O
 - **Thread-Safe Operations**: Concurrent file access with proper locking mechanisms
-- **Security Features**: Path traversal protection, AWS Signature Version 4 authentication, and role-based authorization (RBAC)
+- **Security Features**: Path traversal protection, AWS Signature Version 4 authentication, role-based authorization (RBAC), rate limiting, and DDoS protection
 - **REST API**: Full RESTful API for programmatic access and integration
 - **Multipart Uploads**: Support for large file uploads in chunks with progress tracking
 - **Stream Uploads**: Incremental file writing for efficient large file handling
@@ -363,7 +363,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [x] AWS Signature Version 4 authentication
 - [x] Role-based access control (RBAC) with user management
 - [x] HTTPS/SSL support with automatic certificate generation
-- [ ] Rate limiting and DDoS protection
+- [x] Rate limiting and DDoS protection
 
 ### Phase 2: Enhanced Features & Performance
 

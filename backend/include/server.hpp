@@ -12,6 +12,7 @@
 
 #include "authenticator.hpp"
 #include "authorizer.hpp"
+#include "rate_limiter.hpp"
 
 namespace asio = boost::asio;
 // namespace beast = boost::beast;
@@ -59,9 +60,10 @@ private:
     bool _authorization_enabled = false;
     std::unique_ptr<authenticator> _authenticator;
     std::unique_ptr<authorizer> _authorizer;
+    std::unique_ptr<rate_limiter> _rate_limiter;
     
     void do_accept();
-    void handle_session(tcp::socket socket);
-    void handle_ssl_session(asio::ssl::stream<tcp::socket> socket);
+    void handle_session(tcp::socket socket, const std::string& client_ip = "");
+    void handle_ssl_session(asio::ssl::stream<tcp::socket> socket, const std::string& client_ip = "");
     std::shared_ptr<asio::ssl::context> setup_ssl_context();
 };
