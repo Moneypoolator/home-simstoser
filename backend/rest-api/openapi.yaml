@@ -11,17 +11,37 @@ info:
     - Поддержка multipart uploads для больших файлов
     - Аутентификация с помощью AWS Signature v4
     - CORS поддержка для веб-клиентов
+    - SSL/TLS поддержка с автоматической генерацией сертификатов
+    - Защита от DDoS и ограничение скорости запросов (rate limiting)
+    - Ограничение размера запросов для защиты от перегрузки
     
     ## Аутентификация
     
-    Сервер поддерживает аутентификацию через заголовок `Authorization` 
+    Сервер поддерживает аутентификацию через заголовок `Authorization`
     с использованием алгоритма AWS Signature Version 4.
     
     Формат заголовка:
     ```
     Authorization: AWS4-HMAC-SHA256 Credential=ACCESS_KEY_ID/DATE/REGION/SERVICE/aws4_request, SignedHeaders=host;content-type, Signature=SIGNATURE
     ```
-  version: "1.0.0"
+    
+    ## Безопасность и ограничения
+    
+    Сервер включает встроенную защиту от DDoS-атак и ограничение скорости запросов:
+    - **Ограничение скорости запросов:** Максимально 100 запросов в минуту на IP-адрес
+    - **Ограничение соединений:** Максимально 50 одновременных соединений на IP-адрес
+    - **Ограничение размера запросов:** Максимальный размер одного запроса - 100 МБ
+    - **Автоматический бан IP:** IP-адреса, превышающие лимиты, временно блокируются
+    
+    При превышении лимитов возвращаются HTTP ошибки:
+    - **429 Too Many Requests:** Превышено ограничение скорости запросов
+    - **413 Payload Too Large:** Превышен максимальный размер запроса
+    
+    ## SSL/TLS поддержка
+    
+    Сервер поддерживает HTTPS с автоматической генерацией самоподписанных сертификатов
+    и интеграцией с Let's Encrypt для автоматического обновления сертификатов в продакшене.
+  version: "1.1.0"
   contact:
     name: S3 Storage Team
     email: admin@example.com
@@ -31,11 +51,13 @@ info:
 
 servers:
   - url: http://localhost:9000
-    description: Локальный сервер (HTTP)
+    description: Локальный сервер (HTTP) - для тестирования без SSL
   - url: https://localhost:9000
-    description: Локальный сервер (HTTPS)
+    description: Локальный сервер (HTTPS) - с самоподписанным сертификатом
+  - url: https://your-server.com:9000
+    description: Продакшн сервер с SSL/TLS (рекомендуется использовать HTTPS)
   - url: http://your-server.com:9000
-    description: Продакшн сервер (настроить по необходимости)
+    description: Продакшн сервер без SSL (не рекомендуется для продакшена)
 
 tags:
   - name: Files
@@ -280,6 +302,44 @@ components:
       xml:
         name: Error
 
+    RateLimitError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Тип ошибки
+          example: "rate_limit_exceeded"
+        message:
+          type: string
+          description: Сообщение об ошибке
+          example: "Too many requests, please try again later."
+        retry_after:
+          type: integer
+          description: Время в секундах, через которое можно повторить запрос
+          example: 60
+      required:
+        - error
+        - message
+
+    RequestSizeLimitError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Тип ошибки
+          example: "request_size_limit_exceeded"
+        message:
+          type: string
+          description: Сообщение об ошибке
+          example: "Request payload too large. Maximum allowed size is 100 MB."
+        max_size:
+          type: integer
+          description: Максимальный разрешенный размер запроса в байтах
+          example: 104857600
+      required:
+        - error
+        - message
+
   parameters:
     filenameParam:
       name: filename
@@ -377,6 +437,28 @@ components:
               <RequestId>00000000-0000-0000-0000-000000000000</RequestId>
             </Error>
 
+    TooManyRequests:
+      description: Превышено ограничение скорости запросов (rate limiting)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitError'
+          example:
+            error: "rate_limit_exceeded"
+            message: "Too many requests, please try again later."
+            retry_after: 60
+
+    PayloadTooLarge:
+      description: Превышен максимальный размер запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RequestSizeLimitError'
+          example:
+            error: "request_size_limit_exceeded"
+            message: "Request payload too large. Maximum allowed size is 100 MB."
+            max_size: 104857600
+
 paths:
   # ========== File Operations ==========
   /{filename}:
@@ -417,6 +499,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security:
@@ -454,6 +538,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security:
@@ -485,6 +573,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security:
@@ -512,6 +602,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security:
@@ -572,6 +664,10 @@ paths:
                 $ref: '#/components/schemas/MultipartPartUploadResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
