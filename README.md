@@ -8,22 +8,28 @@ Home S3 Storage is a self-hosted file storage solution that implements basic Ama
 
 ### Key Features
 
-- **S3 API Compatibility**: Basic S3 operations (PUT, GET, DELETE, LIST) with multipart upload support
+- **S3 API Compatibility**: Basic S3 operations (PUT, GET, DELETE, LIST) with multipart and stream upload support
 - **Modern Web Interface**: React-based dashboard for file management with drag-and-drop uploads
 - **High Performance**: Built with C++20 and Boost.Beast for efficient asynchronous I/O
 - **Thread-Safe Operations**: Concurrent file access with proper locking mechanisms
-- **Security Features**: Path traversal protection, access key authentication, and authorization
+- **Security Features**: Path traversal protection, AWS Signature Version 4 authentication, and role-based authorization (RBAC)
 - **REST API**: Full RESTful API for programmatic access and integration
 - **Multipart Uploads**: Support for large file uploads in chunks with progress tracking
+- **Stream Uploads**: Incremental file writing for efficient large file handling
+- **User Management**: Role-based access control with configurable permissions
 - **File Preview**: Built-in preview for common file types (images, PDFs, text files)
+- **SSL/TLS Support**: Secure HTTPS connections with configurable certificates
 
 ### Architecture
 
-The application consists of three main components:
+The application consists of several core components:
 
-1. **Backend Server** (C++): HTTP server built on Boost.Beast handling S3 API requests
-2. **File Manager**: Thread-safe file operations with multipart upload support
-3. **Web Frontend** (React/TypeScript): Modern UI for file management and administration
+1. **Backend Server** (C++): HTTP/HTTPS server built on Boost.Beast handling S3 API requests with asynchronous I/O
+2. **File Manager**: Thread-safe file operations with multipart and stream upload support, path traversal protection
+3. **Authenticator**: AWS Signature Version 4 authentication for secure API access
+4. **Authorizer**: Role-based access control (RBAC) with user and policy management
+5. **Request Handler**: Processes HTTP requests, validates authentication/authorization, and routes to appropriate handlers
+6. **Web Frontend** (React/TypeScript): Modern UI for file management, user administration, and system monitoring
 
 ## 2. Environment Installation Description
 
@@ -338,10 +344,11 @@ aws s3 cp local-file.txt s3://my-file.txt
 
 - [x] Basic S3 API implementation (PUT, GET, DELETE, LIST)
 - [x] Multipart upload support
+- [x] Stream upload support (incremental file writing)
 - [x] Web interface for file management
 - [x] Path traversal protection
-- [ ] AWS Signature Version 4 authentication
-- [ ] Role-based access control (RBAC)
+- [x] AWS Signature Version 4 authentication
+- [x] Role-based access control (RBAC) with user management
 - [ ] HTTPS/SSL support with automatic certificate generation
 - [ ] Rate limiting and DDoS protection
 
@@ -388,11 +395,14 @@ aws s3 cp local-file.txt s3://my-file.txt
 
 ### Current Known Issues & Limitations
 
-- Authentication is basic (access keys only)
-- No native HTTPS support (requires manual certificate setup)
-- Limited error handling for edge cases
-- No file size validation or quotas
-- Temporary files from multipart uploads may accumulate
+- **Authentication**: AWS Signature Version 4 is implemented but requires proper key management
+- **HTTPS/SSL**: SSL/TLS support is available but requires manual certificate configuration (no automatic Let's Encrypt integration)
+- **Error Handling**: Basic error handling is implemented; some edge cases may need improvement
+- **File Size Validation**: No built-in file size limits or quota management
+- **Temporary Files**: Multipart and stream uploads create temporary files that are cleaned up on completion/abort, but orphaned files may accumulate on unexpected crashes
+- **Memory Usage**: Large file uploads buffer data in memory; streaming improvements needed for very large files
+- **Concurrency Limits**: No built-in rate limiting or connection throttling
+- **User Management**: Basic RBAC is implemented but lacks advanced features like groups, permission inheritance, and fine-grained resource controls
 
 ### Contributing
 
