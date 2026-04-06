@@ -28,12 +28,78 @@ public:
         bool verify_client = false;
     };
 
-    s3_server(const std::string& address, 
-              unsigned short port, 
+    struct cors_config {
+        std::vector<std::string> allowed_origins = {"*"};
+        std::vector<std::string> allowed_methods = {"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"};
+        std::vector<std::string> allowed_headers = {"Content-Type", "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Requested-With", "X-Access-Key"};
+        std::vector<std::string> exposed_headers = {"ETag", "X-File-Size", "X-Upload-Id"};
+        bool allow_credentials = false;
+        int max_age = 86400; // 24 hours in seconds
+        
+        // Helper method to check if an origin is allowed
+        bool is_origin_allowed(const std::string& origin) const {
+            if (allowed_origins.empty()) return false;
+            if (allowed_origins.size() == 1 && allowed_origins[0] == "*") return true;
+            return std::find(allowed_origins.begin(), allowed_origins.end(), origin) != allowed_origins.end();
+        }
+        
+        // Helper method to get allowed origins as a comma-separated string
+        std::string get_allowed_origins_header(const std::string& request_origin = "") const {
+            if (allowed_origins.empty()) return "";
+            if (allowed_origins.size() == 1 && allowed_origins[0] == "*") return "*";
+            
+            // If a specific origin is requested and it's allowed, return it
+            if (!request_origin.empty() && is_origin_allowed(request_origin)) {
+                return request_origin;
+            }
+            
+            // Otherwise return all allowed origins
+            std::string result;
+            for (size_t i = 0; i < allowed_origins.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += allowed_origins[i];
+            }
+            return result;
+        }
+        
+        // Helper method to get allowed methods as a comma-separated string
+        std::string get_allowed_methods_header() const {
+            std::string result;
+            for (size_t i = 0; i < allowed_methods.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += allowed_methods[i];
+            }
+            return result;
+        }
+        
+        // Helper method to get allowed headers as a comma-separated string
+        std::string get_allowed_headers_header() const {
+            std::string result;
+            for (size_t i = 0; i < allowed_headers.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += allowed_headers[i];
+            }
+            return result;
+        }
+        
+        // Helper method to get exposed headers as a comma-separated string
+        std::string get_exposed_headers_header() const {
+            std::string result;
+            for (size_t i = 0; i < exposed_headers.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += exposed_headers[i];
+            }
+            return result;
+        }
+    };
+
+    s3_server(const std::string& address,
+              unsigned short port,
               const std::string& storage_path,
               const std::string& keys_file = "",
               const std::string& users_file = "",
-              std::optional<ssl_config> ssl_cfg = std::nullopt);
+              std::optional<ssl_config> ssl_cfg = std::nullopt,
+              std::optional<cors_config> cors_cfg = std::nullopt);
     
     ~s3_server();
     
@@ -55,6 +121,7 @@ private:
     std::atomic<bool> _running{true};
     
     std::optional<ssl_config> _ssl_config;
+    std::optional<cors_config> _cors_config;
     bool _ssl_enabled = false;
     bool _auth_enabled = false;
     bool _authorization_enabled = false;

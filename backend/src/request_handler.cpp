@@ -276,10 +276,8 @@ void request_handler::handle_request(
     
     http::response<http::string_body> response;
     
-    // CORS headers
-    response.set(http::field::access_control_allow_origin, "*");
-    response.set(http::field::access_control_allow_methods, "GET, POST, PUT, DELETE, OPTIONS");
-    response.set(http::field::access_control_allow_headers, "Content-Type, Authorization, X-Amz-Date, X-Amz-Security-Token");
+    // Apply CORS headers (configurable)
+    apply_cors_headers(response, req);
 
     // CORS preflight
     if (req.method() == http::verb::options) {
@@ -306,6 +304,8 @@ void request_handler::handle_request(
     // Обслуживание статических файлов веб-интерфейса
     if (is_static_file_request(path)) {
         response = handle_static_file(path);
+        // Apply CORS headers to static file response
+        apply_cors_headers(response, req);
         response.prepare_payload();
         send(std::move(response));
         return;
@@ -426,6 +426,9 @@ void request_handler::handle_request(
             "Internal server error"
         );
     }
+    
+    // Apply CORS headers to all responses
+    apply_cors_headers(response, req);
     
     response.prepare_payload();
     send(std::move(response));
@@ -1068,6 +1071,66 @@ std::string request_handler::url_decode(const std::string& encoded) {
     return result;
 }
 
+
+// ========== CORS HEADERS ==========
+
+template<class Body>
+void request_handler::apply_cors_headers(http::response<Body>& response, const http::request<http::string_body>& req) const
+{
+    // If CORS is not configured, use default permissive headers
+    if (!_cors_config.has_value()) {
+        response.set(http::field::access_control_allow_origin, "*");
+        response.set(http::field::access_control_allow_methods, "GET, POST, PUT, DELETE, OPTIONS");
+        response.set(http::field::access_control_allow_headers, "Content-Type, Authorization, X-Amz-Date, X-Amz-Security-Token, X-Access-Key");
+        return;
+    }
+    
+    const auto& config = _cors_config.value();
+    
+    // Get the Origin header from the request
+    std::string origin;
+    if (req.find(http::field::origin) != req.end()) {
+        origin = std::string(req[http::field::origin]);
+    }
+    
+    // Set Access-Control-Allow-Origin
+    std::string allow_origin = config.get_allowed_origins_header(origin);
+    response.set(http::field::access_control_allow_origin, allow_origin);
+    
+    // Add Vary: Origin header when Access-Control-Allow-Origin is not a wildcard
+    // This informs caches that the response varies based on the Origin header
+    if (allow_origin != "*") {
+        response.set(http::field::vary, "Origin");
+    }
+    
+    // Set Access-Control-Allow-Methods
+    response.set(http::field::access_control_allow_methods, config.get_allowed_methods_header());
+    
+    // Set Access-Control-Allow-Headers
+    response.set(http::field::access_control_allow_headers, config.get_allowed_headers_header());
+    
+    // Set Access-Control-Expose-Headers if configured
+    std::string exposed_headers = config.get_exposed_headers_header();
+    if (!exposed_headers.empty()) {
+        response.set(http::field::access_control_expose_headers, exposed_headers);
+    }
+    
+    // Set Access-Control-Allow-Credentials if enabled
+    if (config.allow_credentials) {
+        response.set(http::field::access_control_allow_credentials, "true");
+    }
+    
+    // Set Access-Control-Max-Age for preflight requests
+    if (req.method() == http::verb::options && config.max_age > 0) {
+        response.set(http::field::access_control_max_age, std::to_string(config.max_age));
+    }
+    
+    VLOG(3) << "Applied CORS headers for request from origin: " << (origin.empty() ? "(none)" : origin);
+}
+
+// Explicit template instantiation for the response types we use
+template void request_handler::apply_cors_headers<http::string_body>(http::response<http::string_body>&, const http::request<http::string_body>&) const;
+template void request_handler::apply_cors_headers<http::empty_body>(http::response<http::empty_body>&, const http::request<http::string_body>&) const;
 
 std::optional<std::string> request_handler::get_query_param(const std::string& query, const std::string& param) const
 {

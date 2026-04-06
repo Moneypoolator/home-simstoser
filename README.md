@@ -193,6 +193,13 @@ This starts the server with default settings:
 | `--key` | | SSL private key file (alternative to --letsencrypt) | `./certs/server.key` |
 | `--log-level` | `-l` | Log verbosity level (0-4) | `0` |
 | `--log-dir` | | Directory for log files | (current directory) |
+| `--no-cors` | | Disable CORS (default: enabled with permissive settings) | `false` |
+| `--cors-origins` | | Comma-separated allowed origins | `*` |
+| `--cors-methods` | | Comma-separated allowed HTTP methods | `GET,POST,PUT,DELETE,OPTIONS,HEAD` |
+| `--cors-headers` | | Comma-separated allowed headers | `Content-Type,Authorization,X-Amz-Date,X-Amz-Security-Token,X-Requested-With,X-Access-Key` |
+| `--cors-exposed-headers` | | Comma-separated exposed headers | `ETag,X-File-Size,X-Upload-Id` |
+| `--cors-credentials` | | Allow credentials (true/false) | `false` |
+| `--cors-max-age` | | Preflight cache duration in seconds | `86400` |
 | `--help` | `-h` | Show help message | - |
 
 #### Example Usage
@@ -223,19 +230,31 @@ This starts the server with default settings:
 
    *Note: Let's Encrypt certificates must be obtained separately using certbot. The server will check certificate expiration and warn if renewal is needed.*
 
-3. **Run without authentication (development mode):**
+4. **Run without authentication (development mode):**
 
    ```bash
    ./s3_server --no-auth
    ```
 
-4. **Run with verbose logging:**
+5. **Configure CORS for specific origins:**
+
+   ```bash
+   # Allow only specific origins with custom headers
+   ./s3_server --cors-origins "https://example.com,http://localhost:3000" \
+               --cors-headers "Content-Type,Authorization,X-Access-Key" \
+               --cors-credentials true \
+               --cors-max-age 3600
+   ```
+
+   *Note: CORS is enabled by default with permissive settings (`*` origin). Use `--no-cors` to disable CORS entirely.*
+
+6. **Run with verbose logging:**
 
    ```bash
    ./s3_server --log-level 2 --log-dir ./logs
    ```
 
-5. **Run in background:**
+7. **Run in background:**
 
    ```bash
    nohup ./s3_server > server.log 2>&1 &
@@ -370,7 +389,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - [ ] Bucket management (create, delete, configure buckets)
 - [ ] Object versioning and lifecycle policies
 - [ ] Server-side encryption
-- [ ] CORS configuration
+- [x] CORS configuration
 - [ ] Metadata support for objects
 - [ ] Compression (gzip/brotli) for transfers
 - [ ] Cache layer for frequently accessed files

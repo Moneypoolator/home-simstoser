@@ -9,6 +9,7 @@
 #include "file_manager.hpp"
 #include "authenticator.hpp"
 #include "authorizer.hpp"
+#include "server.hpp"  // for cors_config
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -41,6 +42,10 @@ public:
     // Включение/выключение проверок
     void set_auth_enabled(bool enabled) { _auth_enabled = enabled; }
     void set_authorization_enabled(bool enabled) { _authorization_enabled = enabled; }
+    
+    // Настройка CORS
+    void set_cors_config(const std::optional<s3_server::cors_config>& config) { _cors_config = config; }
+    
     http::response<http::string_body> handle_get(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_put(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_delete(const http::request<http::string_body>& req);
@@ -59,6 +64,7 @@ private:
     authorizer* _authorizer;
     bool _auth_enabled = false;
     bool _authorization_enabled = false;
+    std::optional<s3_server::cors_config> _cors_config;
     
     // === Аутентификация: проверка подписи запроса ===
     struct auth_result {
@@ -95,6 +101,10 @@ private:
     
     // URL декодирование
     static std::string url_decode(const std::string& encoded);
+    
+    // Применение CORS заголовков к ответу
+    template<class Body>
+    void apply_cors_headers(http::response<Body>& response, const http::request<http::string_body>& req) const;
     
     // Обработчики для разных методов
     

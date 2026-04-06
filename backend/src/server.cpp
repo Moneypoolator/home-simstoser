@@ -8,12 +8,13 @@
 
 namespace ssl = asio::ssl;
 
-s3_server::s3_server(const std::string& address, 
-                     unsigned short port, 
+s3_server::s3_server(const std::string& address,
+                     unsigned short port,
                      const std::string& storage_path,
                      const std::string& keys_file,
                      const std::string& users_file,
-                     std::optional<ssl_config> ssl_cfg)
+                     std::optional<ssl_config> ssl_cfg,
+                     std::optional<cors_config> cors_cfg)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
@@ -21,6 +22,7 @@ s3_server::s3_server(const std::string& address,
     , _users_file(users_file)
     , _acceptor(_io_context)
     , _ssl_config(std::move(ssl_cfg))
+    , _cors_config(std::move(cors_cfg))
 {
     _ssl_enabled = _ssl_config.has_value();
     
@@ -57,6 +59,19 @@ s3_server::s3_server(const std::string& address,
     // Initialize rate limiter with default configuration
     _rate_limiter = std::make_unique<rate_limiter>();
     LOG(INFO) << "Rate limiting enabled with default configuration";
+    
+    // Log CORS configuration
+    if (_cors_config.has_value()) {
+        LOG(INFO) << "CORS enabled with configuration:";
+        LOG(INFO) << "  Allowed origins: " << _cors_config->get_allowed_origins_header();
+        LOG(INFO) << "  Allowed methods: " << _cors_config->get_allowed_methods_header();
+        LOG(INFO) << "  Allowed headers: " << _cors_config->get_allowed_headers_header();
+        LOG(INFO) << "  Exposed headers: " << _cors_config->get_exposed_headers_header();
+        LOG(INFO) << "  Allow credentials: " << (_cors_config->allow_credentials ? "true" : "false");
+        LOG(INFO) << "  Max age: " << _cors_config->max_age << " seconds";
+    } else {
+        LOG(INFO) << "CORS disabled (using default permissive configuration)";
+    }
 }
 
 s3_server::~s3_server()

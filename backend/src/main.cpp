@@ -150,6 +150,15 @@ int main(int argc, char* argv[])
     std::string key_file = "./certs/server.key";
     std::string letsencrypt_dir = "";
     
+    // CORS configuration
+    bool enable_cors = true;
+    std::vector<std::string> cors_origins = {"*"};
+    std::vector<std::string> cors_methods = {"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"};
+    std::vector<std::string> cors_headers = {"Content-Type", "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Requested-With", "X-Access-Key"};
+    std::vector<std::string> cors_exposed_headers = {"ETag", "X-File-Size", "X-Upload-Id"};
+    bool cors_allow_credentials = false;
+    int cors_max_age = 86400; // 24 hours
+    
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -199,6 +208,76 @@ int main(int argc, char* argv[])
             // Создаем директорию при изменении
             fs::create_directories(FLAGS_log_dir);
         }
+        else if (arg == "--no-cors") {
+            enable_cors = false;
+        }
+        else if (arg == "--cors-origins") {
+            if (i + 1 < argc) {
+                std::string origins = argv[++i];
+                cors_origins.clear();
+                size_t pos = 0;
+                while ((pos = origins.find(',')) != std::string::npos) {
+                    cors_origins.push_back(origins.substr(0, pos));
+                    origins.erase(0, pos + 1);
+                }
+                if (!origins.empty()) {
+                    cors_origins.push_back(origins);
+                }
+            }
+        }
+        else if (arg == "--cors-methods") {
+            if (i + 1 < argc) {
+                std::string methods = argv[++i];
+                cors_methods.clear();
+                size_t pos = 0;
+                while ((pos = methods.find(',')) != std::string::npos) {
+                    cors_methods.push_back(methods.substr(0, pos));
+                    methods.erase(0, pos + 1);
+                }
+                if (!methods.empty()) {
+                    cors_methods.push_back(methods);
+                }
+            }
+        }
+        else if (arg == "--cors-headers") {
+            if (i + 1 < argc) {
+                std::string headers = argv[++i];
+                cors_headers.clear();
+                size_t pos = 0;
+                while ((pos = headers.find(',')) != std::string::npos) {
+                    cors_headers.push_back(headers.substr(0, pos));
+                    headers.erase(0, pos + 1);
+                }
+                if (!headers.empty()) {
+                    cors_headers.push_back(headers);
+                }
+            }
+        }
+        else if (arg == "--cors-exposed-headers") {
+            if (i + 1 < argc) {
+                std::string exposed = argv[++i];
+                cors_exposed_headers.clear();
+                size_t pos = 0;
+                while ((pos = exposed.find(',')) != std::string::npos) {
+                    cors_exposed_headers.push_back(exposed.substr(0, pos));
+                    exposed.erase(0, pos + 1);
+                }
+                if (!exposed.empty()) {
+                    cors_exposed_headers.push_back(exposed);
+                }
+            }
+        }
+        else if (arg == "--cors-credentials") {
+            if (i + 1 < argc) {
+                std::string val = argv[++i];
+                cors_allow_credentials = (val == "true" || val == "1" || val == "yes");
+            }
+        }
+        else if (arg == "--cors-max-age") {
+            if (i + 1 < argc) {
+                cors_max_age = std::stoi(argv[++i]);
+            }
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
@@ -212,6 +291,13 @@ int main(int argc, char* argv[])
                       << "      --letsencrypt, -L <dir> Use Let's Encrypt certificates from directory\n"
                       << "      --cert <file>      SSL certificate file\n"
                       << "      --key <file>       SSL private key file\n"
+                      << "      --no-cors          Disable CORS (default: enabled with permissive settings)\n"
+                      << "      --cors-origins <list>     Comma-separated allowed origins (default: *)\n"
+                      << "      --cors-methods <list>     Comma-separated allowed methods (default: GET,POST,PUT,DELETE,OPTIONS,HEAD)\n"
+                      << "      --cors-headers <list>     Comma-separated allowed headers\n"
+                      << "      --cors-exposed-headers <list> Comma-separated exposed headers\n"
+                      << "      --cors-credentials <bool>  Allow credentials (true/false, default: false)\n"
+                      << "      --cors-max-age <seconds>   Preflight cache duration (default: 86400)\n"
                       << "  -h, --help             Show this help message\n";
             logging::shutdown();
             return 0;
@@ -282,7 +368,20 @@ int main(int argc, char* argv[])
             };
         }
         
-        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg);
+        // Create CORS configuration if enabled
+        std::optional<s3_server::cors_config> cors_cfg;
+        if (enable_cors) {
+            cors_cfg = s3_server::cors_config{
+                .allowed_origins = cors_origins,
+                .allowed_methods = cors_methods,
+                .allowed_headers = cors_headers,
+                .exposed_headers = cors_exposed_headers,
+                .allow_credentials = cors_allow_credentials,
+                .max_age = cors_max_age
+            };
+        }
+        
+        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg, cors_cfg);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;
