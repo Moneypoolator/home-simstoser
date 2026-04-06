@@ -48,6 +48,7 @@ add_executable(integration_tests
     ../src/request_handler.cpp
     ../src/authenticator.cpp
     ../src/authorizer.cpp
+    ../src/rate_limiter.cpp
 )
 
 target_link_libraries(integration_tests

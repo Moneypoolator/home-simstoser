@@ -308,6 +308,7 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
             if (ec != beast::http::error::end_of_stream) {
                 LOG(WARNING) << "Read error: " << ec.message();
             }
+            cleanup();
             return;
         }
         
@@ -336,6 +337,8 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
                 http::write(socket, res, ec);
                 socket.shutdown(tcp::socket::shutdown_send, ec);
                 socket.close(ec);
+
+                cleanup();
                 return;
             }
             
@@ -354,6 +357,8 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
                 http::write(socket, res, ec);
                 socket.shutdown(tcp::socket::shutdown_send, ec);
                 socket.close(ec);
+
+                cleanup();
                 return;
             }
             
@@ -372,11 +377,12 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
         request_handler handler(fm, _authenticator.get(), _authorizer.get());
         handler.set_auth_enabled(_auth_enabled);
         handler.set_authorization_enabled(_authorization_enabled);
+        handler.set_cors_config(_cors_config);
         
         // Обрабатываем запрос
         handler.handle_request(
             std::move(req),
-            [this, &socket, start_time, client_ip](http::response<http::string_body>&& res) {
+            [this, &socket, start_time, cleanup](http::response<http::string_body>&& res) {
                 beast::error_code ec;
                 
                 // Отправляем ответ
@@ -396,6 +402,8 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
                 // Закрываем соединение
                 socket.shutdown(tcp::socket::shutdown_send, ec);
                 socket.close(ec);
+
+                cleanup();
             }
         );
     } catch (const std::exception& e) {
@@ -413,22 +421,38 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
             _rate_limiter->record_disconnection(client_ip);
         }
     };
-    
-    try {
-        beast::error_code ec;
-        
-        // Use provided client_ip or get from socket
-        std::string client_info = client_ip;
-        if (client_info.empty() || client_info == "unknown") {
-            auto remote_endpoint = socket.next_layer().remote_endpoint(ec);
-            if (!ec) {
-                client_info = remote_endpoint.address().to_string() +
-                             ":" + std::to_string(remote_endpoint.port());
-            }
+
+    beast::error_code ec;
+
+    // Use provided client_ip or get from socket
+    std::string client_info = client_ip;
+    if (client_info.empty() || client_info == "unknown") {
+        auto remote_endpoint = socket.next_layer().remote_endpoint(ec);
+        if (!ec) {
+            client_info = remote_endpoint.address().to_string() + ":" + std::to_string(remote_endpoint.port());
         }
-        
-        VLOG(2) << "Handling HTTPS session from " << client_info;
-        
+    }
+
+    VLOG(2) << "Handling HTTPS session from " << client_info;
+
+    std::string clean_ip = client_info;
+    size_t colon_pos = client_info.find(':');
+    if (colon_pos != std::string::npos) {
+        clean_ip = client_info.substr(0, colon_pos);
+    }
+
+    // === RATE LIMITING для SSL ===
+    if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+        if (!_rate_limiter->allow_connection(clean_ip)) {
+            LOG(WARNING) << "SSL connection rate limit exceeded for IP: " << clean_ip;
+            socket.next_layer().close(ec);
+            return;
+        }
+        _rate_limiter->record_connection(clean_ip);
+    }
+
+    try {
+
         // Создаем объекты для чтения/записи
         beast::flat_buffer buffer;
         
@@ -444,12 +468,45 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
             if (ec != beast::http::error::end_of_stream) {
                 LOG(WARNING) << "SSL read error: " << ec.message();
             }
+            cleanup();
             return;
         }
         
         // Получаем запрос из парсера
         http::request<http::string_body> req = parser.release();
-        
+
+        // Rate limiting для запроса (проверка лимитов и размера)
+        if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+            if (!_rate_limiter->allow_request(clean_ip)) {
+                LOG(WARNING) << "SSL rate limit exceeded for IP: " << clean_ip;
+                http::response<http::string_body> res{http::status::too_many_requests, 11};
+                res.set(http::field::content_type, "application/json");
+                res.body() = R"({"error": "rate_limit_exceeded", "message": "Too many requests"})";
+                res.prepare_payload();
+                http::write(socket, res, ec);
+                socket.shutdown(ec);
+                socket.next_layer().close(ec);
+                cleanup();
+                return;
+            }
+            
+            size_t request_size = req.body().size();
+            if (!_rate_limiter->check_request_size(clean_ip, request_size)) {
+                LOG(WARNING) << "SSL request size limit exceeded for IP: " << clean_ip;
+                http::response<http::string_body> res{http::status::payload_too_large, 11};
+                res.set(http::field::content_type, "application/json");
+                res.body() = R"({"error": "request_too_large", "message": "Request size exceeds limit"})";
+                res.prepare_payload();
+                http::write(socket, res, ec);
+                socket.shutdown(ec);
+                socket.next_layer().close(ec);
+                cleanup();
+                return;
+            }
+            
+            _rate_limiter->record_request(clean_ip, request_size);
+        }
+
         // ЯВНОЕ ПРЕОБРАЗОВАНИЕ string_view В string
         logging::log_request(
             std::string(req.method_string()),
@@ -459,12 +516,16 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
         
         // Создаем менеджер файлов и обработчик запросов
         file_manager fm(_storage_path);
-        request_handler handler(fm);
+        // ПЕРЕДАЁМ аутентификатор, авторизатор и CORS
+        request_handler handler(fm, _authenticator.get(), _authorizer.get());
+        handler.set_auth_enabled(_auth_enabled);
+        handler.set_authorization_enabled(_authorization_enabled);
+        handler.set_cors_config(_cors_config);
         
         // Обрабатываем запрос
         handler.handle_request(
             std::move(req),
-            [&socket, start_time](http::response<http::string_body>&& res) {
+            [&socket, start_time, cleanup](http::response<http::string_body>&& res) {
                 beast::error_code ec;
                 
                 // Отправляем ответ через зашифрованное соединение
@@ -486,9 +547,12 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
                 socket.shutdown(ec);
                 socket.next_layer().shutdown(tcp::socket::shutdown_send, ec);
                 socket.next_layer().close(ec);
+
+                cleanup();
             }
         );
     } catch (const std::exception& e) {
         LOG(ERROR) << "SSL session error: " << e.what();
+        cleanup();
     }
 }
