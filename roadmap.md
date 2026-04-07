@@ -98,7 +98,7 @@
 
 ### Ближайшие (критические исправления)
 
-1. [X] **Исправить SSL-ветку** – передать `_authenticator, `_authorizer`, `_rate_limiter` в request_handler для HTTPS.
+1. [X] **Исправить SSL-ветку** – передать `_authenticator`, `_authorizer`, `_rate_limiter` в request_handler для HTTPS.
 
 2. [ ] **Реализовать проверку timestamp** – допустимое отклонение 15 минут, парсинг `x-amz-date`.
 
