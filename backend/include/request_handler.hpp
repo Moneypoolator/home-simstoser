@@ -3,13 +3,14 @@
 
 #include <string>
 #include <functional>
-#include <vector>
 #include <optional>
 #include <boost/beast.hpp>
+#include <glog/logging.h>
 #include "file_manager.hpp"
 #include "authenticator.hpp"
 #include "authorizer.hpp"
 #include "server.hpp"  // for cors_config
+#include "logging.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -32,13 +33,152 @@ public:
         authenticator* auth = nullptr,
         authorizer* authorizer = nullptr
     );
-    
-    template<class body, class allocator>
+
+    // template <class Body, class Allocator, class Send>
+    // void handle_request(
+    //     http::request<Body, http::basic_fields<Allocator>>&& req,
+    //     Send&& send);
+
+    template <class Body, class Allocator>
     void handle_request(
-        http::request<body, http::basic_fields<allocator>>&& req,
-        std::function<void(http::response<http::string_body>)> send
-    );
-    
+        http::request<Body, http::basic_fields<Allocator>>&& req,
+        std::function<void(http::response<http::string_body>)> send)
+    {
+        VLOG(1) << "Handling request: " << req.method_string() << " " << req.target();
+        
+        http::response<http::string_body> response;
+        apply_cors_headers(response, req);
+        
+        // CORS preflight
+        if (req.method() == http::verb::options) {
+            VLOG(2) << "Handling CORS preflight request";
+            response.result(http::status::ok);
+            response.set(http::field::content_type, "text/plain");
+            response.body() = "OK";
+            response.prepare_payload();
+            send(std::move(response));
+            return;
+        }
+        
+        std::string path = std::string(req.target());
+        std::string normalized_path = path;
+        if (!normalized_path.empty() && normalized_path[0] == '/') {
+            normalized_path = normalized_path.substr(1);
+        }
+        if (normalized_path.compare(0, 4, "api/") == 0) {
+            normalized_path = normalized_path.substr(4);
+        }
+        
+        // Обслуживание статических файлов веб-интерфейса
+        if (is_static_file_request(path)) {
+            response = handle_static_file(path);
+            apply_cors_headers(response, req);
+            response.prepare_payload();
+            send(std::move(response));
+            return;
+        }
+        
+        // Определяем требуемое разрешение для запроса
+        auto required_perm = get_required_permission(req);
+        
+        // Аутентификация
+        auth_result auth_result = authenticate_request(req);
+        
+        // Авторизация или публичный доступ
+        bool access_granted = false;
+        std::string user_context = "anonymous";
+        
+        if (auth_result.authenticated && auth_result.user_id) {
+            if (!required_perm || authorize_request(*auth_result.user_id, req, *required_perm)) {
+                access_granted = true;
+                user_context = auth_result.username.value_or(*auth_result.user_id);
+                VLOG(2) << "Access granted to authenticated user: " << user_context;
+            } else {
+                response = create_error_response(
+                    http::status::forbidden,
+                    "AccessDenied",
+                    "Access denied"
+                );
+            }
+        } else if (required_perm) {
+            if (!_auth_enabled && !_authorization_enabled) {
+                access_granted = true;
+                VLOG(2) << "Access granted (auth disabled)";
+            } else if (check_public_access(req, *required_perm)) {
+                access_granted = true;
+                VLOG(2) << "Access granted via public access";
+            } else {
+                response = create_error_response(
+                    http::status::unauthorized,
+                    "InvalidSignature",
+                    "Signature validation failed"
+                );
+            }
+        } else {
+            access_granted = true;
+        }
+        
+        if (!access_granted) {
+            response.prepare_payload();
+            send(std::move(response));
+            return;
+        }
+        
+        // Обработка запроса по пути и методу
+        try {
+            if (path.find("/upload/initiate") != std::string::npos && req.method() == http::verb::post) {
+                response = handle_initiate_upload(req);
+            }
+            else if (path.find("/upload/part") != std::string::npos && req.method() == http::verb::put) {
+                response = handle_upload_part(req);
+            }
+            else if (path.find("/upload/complete") != std::string::npos && req.method() == http::verb::post) {
+                response = handle_complete_upload(req);
+            }
+            else if (path.find("/upload/abort") != std::string::npos && req.method() == http::verb::delete_) {
+                response = handle_abort_upload(req);
+            }
+            else if (path.find("/upload/progress") != std::string::npos && req.method() == http::verb::get) {
+                response = handle_get_progress(req);
+            }
+            else if (normalized_path == "list" && req.method() == http::verb::get) {
+                response = handle_list(req);
+            }
+            else if (req.method() == http::verb::get && (path == "/files" || path == "/users" || path == "/keys" || path == "/policies" || path == "/settings" || path == "/dashboard" || path == "/login")) {
+                response = handle_static_file("/");
+            }
+            else if (req.method() == http::verb::get) {
+                response = handle_get(req);
+            }
+            else if (req.method() == http::verb::put) {
+                response = handle_put(req);
+            }
+            else if (req.method() == http::verb::delete_) {
+                response = handle_delete(req);
+            }
+            else if ((path == "/openapi.yaml" || path == "/api/spec") && req.method() == http::verb::get) {
+                response = handle_openapi_spec(req);
+            }
+            else {
+                response = create_response(
+                    http::status::method_not_allowed,
+                    R"({"error": "Method not allowed"})"
+                );
+            }
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "Exception handling request: " << e.what();
+            response = create_error_response(
+                http::status::internal_server_error,
+                "InternalError",
+                "Internal server error"
+            );
+        }
+        
+        apply_cors_headers(response, req);
+        response.prepare_payload();
+        send(std::move(response));
+    }
+
     // Включение/выключение проверок
     void set_auth_enabled(bool enabled) { _auth_enabled = enabled; }
     void set_authorization_enabled(bool enabled) { _authorization_enabled = enabled; }
@@ -57,6 +197,9 @@ public:
         const std::string& content_type = "application/json"
     );
     std::string get_filename_from_path(const std::string& path) const;
+
+    http::response<http::file_body> handle_get_file_body(const http::request<http::string_body>& req);
+
 private:
     friend class RequestHandlerTest;
     file_manager& _file_manager;
@@ -107,6 +250,8 @@ private:
     void apply_cors_headers(http::response<Body>& response, const http::request<http::string_body>& req) const;
     
     // Обработчики для разных методов
+    // http::response<http::file_body> handle_get_file(const std::string& filename);
+    
     
     // Multipart upload handlers
     http::response<http::string_body> handle_initiate_upload(const http::request<http::string_body>& req);

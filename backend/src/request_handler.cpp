@@ -266,11 +266,11 @@ std::string request_handler::permission_to_string(permission_type perm) {
 }
 
 // ========== ОСНОВНАЯ ОБРАБОТКА ЗАПРОСОВ ==========
-
-template<class body, class allocator>
+/*
+template <class Body, class Allocator, class Send>
 void request_handler::handle_request(
-    http::request<body, http::basic_fields<allocator>>&& req,
-    std::function<void(http::response<http::string_body>)> send)
+    http::request<Body, http::basic_fields<Allocator>>&& req,
+    Send&& send)
 {
     VLOG(1) << "Handling request: " << req.method_string() << " " << req.target();
     
@@ -433,50 +433,76 @@ void request_handler::handle_request(
     response.prepare_payload();
     send(std::move(response));
 }
+*/
+// // Явная инстанциация для используемых типов
+// template void request_handler::handle_request<http::string_body, std::allocator<char>>(
+//     http::request<http::string_body, http::basic_fields<std::allocator<char>>>&&,
+//     std::function<void(http::response<http::string_body>)>
+// );
 
-// Явная инстанциация для используемых типов
-template void request_handler::handle_request<http::string_body, std::allocator<char>>(
-    http::request<http::string_body, http::basic_fields<std::allocator<char>>>&&,
-    std::function<void(http::response<http::string_body>)>
-);
+// template<class Body, class Allocator, class Send>
+// void request_handler::handle_request(
+//     http::request<Body, http::basic_fields<Allocator>>&& req,
+//     Send&& send);
 
+// http::response<http::file_body> request_handler::handle_get_file(const std::string& filename) {
+//     // Проверки безопасности, существования файла...
+//     fs::path file_path = _file_manager.get_full_path(filename); // новый метод
+    
+//     http::response<http::file_body> res{http::status::ok, 11};
+//     res.body().open(file_path.c_str(), boost::beast::file_mode::read);
+//     res.set(http::field::content_type, "application/octet-stream");
+//     res.set(http::field::content_length, std::to_string(fs::file_size(file_path)));
+//     return res;
+// }
 
-http::response<http::string_body> request_handler::handle_get(const http::request<http::string_body>& req)
+http::response<http::string_body> request_handler::handle_get(
+    const http::request<http::string_body>& req)
 {
     std::string filename = get_filename_from_path(std::string(req.target()));
-    
     if (filename.empty()) {
-        LOG(WARNING) << "GET request with empty filename";
-        return create_response(
-            http::status::bad_request,
-            R"({"error": "Filename is required"})"
-        );
+        return create_response(http::status::bad_request, R"({"error": "Filename required"})");
     }
     
-    auto file_data = _file_manager.download_file(filename);
-    
-    if (!file_data) {
-        LOG(WARNING) << "File not found: " << filename;
-        return create_response(
-            http::status::not_found,
-            R"({"error": "File not found"})"
-        );
+    fs::path full_path = _file_manager.get_full_path(filename);
+    if (!fs::exists(full_path) || !fs::is_regular_file(full_path)) {
+        return create_response(http::status::not_found, R"({"error": "File not found"})");
     }
     
-    auto metadata = _file_manager.get_metadata(filename);
+    auto file_size = fs::file_size(full_path);
+    std::ifstream file(full_path, std::ios::binary);
+    if (!file) {
+        return create_response(http::status::internal_server_error, R"({"error": "Cannot open file"})");
+    }
+    
+    // Резервируем память
+    std::string body;
+    body.reserve(static_cast<size_t>(file_size));
+    
+    // Буфер 1 MB
+    constexpr size_t buffer_size = 1024 * 1024;
+    std::vector<char> buffer(buffer_size);
+    
+    while (file) {
+        file.read(buffer.data(), buffer_size);
+        std::streamsize bytes = file.gcount();
+        if (bytes > 0) {
+            body.append(buffer.data(), static_cast<size_t>(bytes));
+        }
+    }
+    
+    file.close();
     
     http::response<http::string_body> res{http::status::ok, req.version()};
     res.set(http::field::content_type, "application/octet-stream");
-    res.set(http::field::content_length, std::to_string(file_data->size()));
+    res.set(http::field::content_length, std::to_string(file_size));
     
+    auto metadata = _file_manager.get_metadata(filename);
     if (metadata) {
         res.set("ETag", metadata->etag);
-        res.set("X-File-Size", std::to_string(metadata->size));
     }
     
-    res.body() = std::string(file_data->begin(), file_data->end());
-    
-    LOG(INFO) << "File served successfully: " << filename;
+    res.body() = std::move(body);
     return res;
 }
 
@@ -1045,6 +1071,49 @@ std::string request_handler::get_filename_from_path(const std::string& path) con
     std::string decoded = url_decode(clean_path);
     VLOG(2) << "Decoded filename: " << decoded;
     return decoded;
+}
+
+http::response<http::file_body> request_handler::handle_get_file_body(const http::request<http::string_body>& req)
+{
+    std::string filename = get_filename_from_path(std::string(req.target()));
+    if (filename.empty()) {
+        throw std::invalid_argument("Empty filename");
+    }
+    
+    // Получаем полный путь к файлу
+    fs::path full_path = _file_manager.get_full_path(filename);
+    
+    // Проверяем существование файла
+    if (!fs::exists(full_path) || !fs::is_regular_file(full_path)) {
+        throw std::runtime_error("File not found: " + filename);
+    }
+    
+    auto file_size = fs::file_size(full_path);
+    
+    // Создаём ответ с file_body
+    http::response<http::file_body> res{http::status::ok, req.version()};
+    
+    // Открываем файл для чтения
+    boost::beast::error_code ec;
+    res.body().open(full_path.c_str(), boost::beast::file_mode::read, ec);
+    if (ec) {
+        LOG(ERROR) << "Failed to open file for streaming: " << full_path
+                   << ", error: " << ec.message();
+        throw std::runtime_error("Cannot open file");
+    }
+    
+    // Устанавливаем заголовки
+    res.set(http::field::content_type, "application/octet-stream");
+    res.set(http::field::content_length, std::to_string(file_size));
+    
+    // Добавляем ETag, если есть
+    auto metadata = _file_manager.get_metadata(filename);
+    if (metadata) {
+        res.set("ETag", metadata->etag);
+    }
+    
+    LOG(INFO) << "Streaming file (file_body): " << filename << " (" << file_size << " bytes)";
+    return res;
 }
 
 std::string request_handler::url_decode(const std::string& encoded) {

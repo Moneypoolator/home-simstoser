@@ -31,76 +31,20 @@ file_manager::~file_manager()
 }
 
 
-bool file_manager::upload_file(const std::string& filename, const std::vector<char>& data)
-{
-    if (!is_path_safe(filename)) {
-        LOG(WARNING) << "Attempted unsafe path access: " << filename;
-        return false;
-    }
-
-    try {
-        fs::path file_path = _storage_dir / filename;
-        
-        // Создаем родительские директории, если нужно
-        fs::create_directories(file_path.parent_path());
-        
-        // Записываем файл
-        std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
-        if (!file) {
-            LOG(ERROR) << "Failed to open file for writing: " << file_path.string();
-            return false;
-        }
-        
-        file.write(data.data(), static_cast<std::streamsize>(data.size()));
-        file.close();
-        
-        if (file.good()) {
-            logging::log_file_operation("UPLOAD", filename, data.size());
-            return true;
-        } else {
-            LOG(ERROR) << "Failed to write file: " << filename;
-            return false;
-        }
-    } catch (const std::exception& e) {
-        LOG(ERROR) << "Exception during file upload: " << e.what();
-        return false;
-    }
+bool file_manager::upload_file(const std::string& filename, const std::vector<char>& data) {
+    // Превращаем вектор в поток
+    std::stringstream ss;
+    ss.write(data.data(), data.size());
+    return upload_file_stream(filename, ss);
 }
 
-std::optional<std::vector<char>> file_manager::download_file(const std::string& filename)
-{
-    if (!is_path_safe(filename)) {
-        LOG(WARNING) << "Attempted unsafe path access: " << filename;
+std::optional<std::vector<char>> file_manager::download_file(const std::string& filename) {
+    std::stringstream ss;
+    if (!download_file_stream(filename, ss)) {
         return std::nullopt;
     }
-
-    try {
-        fs::path file_path = _storage_dir / filename;
-        
-        if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
-            VLOG(1) << "File not found: " << filename;
-            return std::nullopt;
-        }
-        
-        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-        if (!file) {
-            LOG(ERROR) << "Failed to open file for reading: " << file_path.string();
-            return std::nullopt;
-        }
-        
-        auto file_size = file.tellg();
-        std::vector<char> data(file_size);
-        
-        file.seekg(0, std::ios::beg);
-        file.read(data.data(), file_size);
-        file.close();
-        
-        logging::log_file_operation("DOWNLOAD", filename, file_size);
-        return data;
-    } catch (const std::exception& e) {
-        LOG(ERROR) << "Exception during file download: " << e.what();
-        return std::nullopt;
-    }
+    std::string str = ss.str();
+    return std::vector<char>(str.begin(), str.end());
 }
 
 bool file_manager::delete_file(const std::string& filename)
@@ -509,6 +453,13 @@ bool file_manager::is_path_safe(const std::string& filename) const
     return is_path_safe(_storage_dir, filename);
 }
 
+fs::path file_manager::get_full_path(const std::string& filename) const {
+    if (!is_path_safe(filename)) {
+        throw std::runtime_error("Unsafe path: " + filename);
+    }
+    return _storage_dir / filename;
+}
+
 std::string file_manager::generate_upload_id() const
 {
     std::random_device rd;
@@ -544,64 +495,55 @@ std::optional<const multipart_upload*> file_manager::get_upload(const std::strin
     return &it->second;
 }
 
-bool file_manager::merge_parts(const multipart_upload& upload, const std::vector<int>& part_numbers)
-{
+bool file_manager::merge_parts(const multipart_upload& upload, const std::vector<int>& part_numbers) {
     try {
-        // Путь к финальному файлу
         fs::path final_path = _storage_dir / upload.filename;
         fs::create_directories(final_path.parent_path());
         
-        // Открываем файл для записи
         std::ofstream final_file(final_path, std::ios::binary | std::ios::trunc);
         if (!final_file) {
-            LOG(ERROR) << "Failed to open final file for writing: " << final_path.string();
+            LOG(ERROR) << "Cannot create final file: " << final_path;
             return false;
         }
         
-        // Объединяем все части в правильном порядке
+        constexpr size_t buffer_size = 1024 * 1024; // 1 MB
+        std::vector<char> buffer(buffer_size);
+        
         for (int part_number : part_numbers) {
             std::ostringstream part_name;
             part_name << "part_" << std::setw(5) << std::setfill('0') << part_number;
-            
             fs::path part_path = upload.temp_dir / part_name.str();
             
             if (!fs::exists(part_path)) {
-                LOG(ERROR) << "Part file not found: " << part_path.string();
-                final_file.close();
+                LOG(ERROR) << "Missing part: " << part_path;
                 return false;
             }
             
-            // Читаем часть
-            std::ifstream part_file(part_path, std::ios::binary | std::ios::ate);
+            std::ifstream part_file(part_path, std::ios::binary);
             if (!part_file) {
-                LOG(ERROR) << "Failed to open part file: " << part_path.string();
-                final_file.close();
+                LOG(ERROR) << "Cannot open part: " << part_path;
                 return false;
             }
             
-            auto part_size = part_file.tellg();
-            std::vector<char> part_data(part_size);
-            
-            part_file.seekg(0, std::ios::beg);
-            part_file.read(part_data.data(), part_size);
-            part_file.close();
-            
-            // Записываем в финальный файл
-            final_file.write(part_data.data(), static_cast<std::streamsize>(part_data.size()));
+            // Копируем с буфером
+            while (part_file) {
+                part_file.read(buffer.data(), buffer_size);
+                std::streamsize bytes = part_file.gcount();
+                if (bytes > 0) {
+                    final_file.write(buffer.data(), bytes);
+                    if (!final_file) {
+                        LOG(ERROR) << "Write error while merging part " << part_number;
+                        return false;
+                    }
+                }
+            }
         }
         
         final_file.close();
-        
-        if (final_file.good()) {
-            LOG(INFO) << "Parts merged successfully: " << upload.filename 
-                      << " (" << part_numbers.size() << " parts)";
-            return true;
-        } else {
-            LOG(ERROR) << "Failed to write final file: " << upload.filename;
-            return false;
-        }
+        LOG(INFO) << "Merged " << part_numbers.size() << " parts into " << upload.filename;
+        return true;
     } catch (const std::exception& e) {
-        LOG(ERROR) << "Exception during parts merging: " << e.what();
+        LOG(ERROR) << "Merge parts exception: " << e.what();
         return false;
     }
 }
@@ -856,3 +798,97 @@ void file_manager::cleanup_stream_upload(const std::string& stream_id)
     // Удаляем из активных загрузок
     _active_stream_uploads.erase(stream_id);
 }
+
+bool file_manager::upload_file_stream(const std::string& filename, std::istream& data) {
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Unsafe path: " << filename;
+        return false;
+    }
+    
+    try {
+        fs::path file_path = _storage_dir / filename;
+        fs::create_directories(file_path.parent_path());
+        
+        std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
+        if (!file) {
+            LOG(ERROR) << "Cannot create file: " << file_path;
+            return false;
+        }
+        
+        // Буфер 1 MB
+        constexpr size_t buffer_size = 1024 * 1024;
+        std::vector<char> buffer(buffer_size);
+        
+        while (data) {
+            data.read(buffer.data(), buffer_size);
+            std::streamsize bytes = data.gcount();
+            if (bytes > 0) {
+                file.write(buffer.data(), bytes);
+                if (!file) {
+                    LOG(ERROR) << "Write error during upload: " << filename;
+                    return false;
+                }
+            }
+        }
+        
+        file.close();
+        logging::log_file_operation("UPLOAD_STREAM", filename, fs::file_size(file_path));
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception in upload_file_stream: " << e.what();
+        return false;
+    }
+}
+
+
+
+#ifdef __linux__
+#include <sys/sendfile.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+bool file_manager::download_file_stream(const std::string& filename, std::ostream& out) {
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Unsafe path: " << filename;
+        return false;
+    }
+    
+    fs::path file_path = _storage_dir / filename;
+    if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
+        return false;
+    }
+    
+    int fd = open(file_path.c_str(), O_RDONLY);
+    if (fd == -1) {
+        LOG(ERROR) << "Cannot open file for sendfile: " << filename;
+        return false;
+    }
+    
+    off_t size = fs::file_size(file_path);
+    off_t offset = 0;
+    
+    // Если out — это сокет, можно использовать sendfile напрямую, но у нас ostream.
+    // Для ostream мы не можем использовать sendfile, поэтому делаем буферизированное чтение.
+    // В HTTP-ответе мы можем использовать beast::http::response с body-генератором,
+    // но для простоты здесь реализуем буфер.
+    
+    constexpr size_t buffer_size = 1024 * 1024;
+    std::vector<char> buffer(buffer_size);
+    
+    ssize_t bytes_sent;
+    while (offset < size) {
+        size_t to_read = std::min(buffer_size, static_cast<size_t>(size - offset));
+        ssize_t bytes_read = read(fd, buffer.data(), to_read);
+        if (bytes_read <= 0) break;
+        out.write(buffer.data(), bytes_read);
+        offset += bytes_read;
+    }
+    
+    close(fd);
+    return offset == size;
+}
+
+#else
+// Windows: использовать ReadFile / WriteFile или TransmitFile
+#endif
+

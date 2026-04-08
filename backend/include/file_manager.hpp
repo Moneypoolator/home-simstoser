@@ -108,6 +108,14 @@ public:
     std::optional<std::uintmax_t> get_stream_upload_progress(const std::string& stream_id) const;
 
     static bool is_path_safe(const fs::path& storage_dir, const std::string& filename);
+    fs::path get_full_path(const std::string& filename) const;
+
+    bool upload_file_stream(const std::string& filename, std::istream& data);
+    bool download_file_stream(const std::string& filename, std::ostream& out);
+    
+    // Метод для получения FILE* или дескриптора для sendfile
+    int get_file_descriptor(const std::string& filename) const; // или возвращать FILE*
+    
 
 private:
     fs::path _storage_dir;
@@ -146,4 +154,8 @@ private:
     
     // Очистка стриминговой загрузки
     void cleanup_stream_upload(const std::string& stream_id);
+    
+    // Вспомогательные методы для копирования с буфером
+    bool copy_with_buffer(std::ifstream& src, std::ofstream& dst, size_t buffer_size = 1024 * 1024);
+    bool copy_with_sendfile(int src_fd, int dst_fd, off_t size);
 };
