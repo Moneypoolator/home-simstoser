@@ -1,16 +1,151 @@
 #include "authenticator.hpp"
+
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <random>
 #include <algorithm>
+#include <chrono>
 #include <ctime>
 #include <set>
 #include <glog/logging.h>
-#include "logging.hpp"
+#include <cctype>
+#include <vector>
+
+
+static std::string url_encode(const std::string& value) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+    for (unsigned char c : value) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+        } else {
+            escaped << '%' << std::uppercase << std::setw(2) << static_cast<int>(c);
+        }
+    }
+    return escaped.str();
+}
+
+static std::string url_decode(const std::string& str) {
+    std::string result;
+    for (size_t i = 0; i < str.length(); ++i) {
+        if (str[i] == '%' && i + 2 < str.length()) {
+            int hex;
+            std::stringstream ss;
+            ss << std::hex << str.substr(i + 1, 2);
+            ss >> hex;
+            result += static_cast<char>(hex);
+            i += 2;
+        } else if (str[i] == '+') {
+            result += ' ';
+        } else {
+            result += str[i];
+        }
+    }
+    return result;
+}
+
+static std::optional<std::chrono::system_clock::time_point> parse_iso8601(const std::string& ts) {
+    // Ожидаемый формат: YYYYMMDDTHHMMSSZ
+    if (ts.length() != 16 || ts[8] != 'T' || ts[15] != 'Z') {
+        return std::nullopt;
+    }
+    
+    std::tm tm = {};
+    std::istringstream ss(ts);
+    ss >> std::get_time(&tm, "%Y%m%dT%H%M%S");
+    if (ss.fail()) {
+        return std::nullopt;
+    }
+    
+    // Преобразуем tm в time_t (предполагаем UTC)
+    std::time_t time_t = std::mktime(&tm);
+    // mktime ожидает локальное время, поэтому корректируем: используем timegm для UTC
+    // В Windows нет timegm, используем _mkgmtime
+#ifdef _WIN32
+    time_t = _mkgmtime(&tm);
+#else
+    time_t = timegm(&tm);
+#endif
+    
+    if (time_t == -1) {
+        return std::nullopt;
+    }
+    
+    return std::chrono::system_clock::from_time_t(time_t);
+}
 
 authenticator::authenticator() {
     LOG(INFO) << "Authenticator initialized";
+}
+
+std::string authenticator::build_canonical_query_string(const std::string& uri) const {
+    size_t query_pos = uri.find('?');
+    if (query_pos == std::string::npos) {
+        return "";
+    }
+    
+    std::string query = uri.substr(query_pos + 1);
+    std::vector<std::pair<std::string, std::string>> params;
+    
+    size_t start = 0;
+    while (start < query.length()) {
+        size_t end = query.find('&', start);
+        if (end == std::string::npos) end = query.length();
+        
+        std::string param = query.substr(start, end - start);
+        size_t eq = param.find('=');
+        
+        std::string key, value;
+        if (eq != std::string::npos) {
+            key = url_decode(param.substr(0, eq));
+            value = url_decode(param.substr(eq + 1));
+        } else {
+            key = url_decode(param);
+            value = "";
+        }
+        
+        params.emplace_back(key, value);
+        start = end + 1;
+    }
+    
+    // Сортировка по имени ключа (лексикографически)
+    std::sort(params.begin(), params.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    
+    // Сборка канонической строки
+    std::string canonical;
+    for (size_t i = 0; i < params.size(); ++i) {
+        if (i > 0) canonical += '&';
+        canonical += url_encode(params[i].first) + '=' + url_encode(params[i].second);
+    }
+    
+    return canonical;
+}
+
+bool authenticator::is_timestamp_valid(const std::string& timestamp_str) const {
+    auto request_time = parse_iso8601(timestamp_str);
+    if (!request_time) {
+        LOG(WARNING) << "Invalid timestamp format: " << timestamp_str;
+        return false;
+    }
+    
+    auto now = std::chrono::system_clock::now();
+    auto diff = now - *request_time;
+    
+    // Допустимое отклонение ±15 минут
+    const auto max_diff = std::chrono::minutes(15);
+    
+    if (diff < -max_diff || diff > max_diff) {
+        LOG(WARNING) << "Timestamp out of range: " << timestamp_str
+                     << " (difference: " << std::chrono::duration_cast<std::chrono::seconds>(diff).count()
+                     << " seconds)";
+        return false;
+    }
+    
+    VLOG(2) << "Timestamp is valid: " << timestamp_str;
+    return true;
 }
 
 bool authenticator::load_keys(const std::string& filepath) {
@@ -311,17 +446,30 @@ std::string authenticator::generate_signature(
         signed_headers += sorted_header_names[i];
     }
     
+    // Каноническая строка запроса (новое!)
+    std::string canonical_query_string = build_canonical_query_string(uri);
+    
+    // Путь без query-параметров
+    std::string path_only = uri;
+    size_t qpos = uri.find('?');
+    if (qpos != std::string::npos) {
+        path_only = uri.substr(0, qpos);
+    }
+    if (path_only.empty()) {
+         path_only = "/";
+    }
+
     // 3. Hash the request body
     std::string payload_hash = sha256_hex(body);
-    
+
     // 4. Build canonical request
     std::string canonical_request = method + "\n"
-                                  + uri + "\n"
-                                  + "" + "\n"  // canonical query string (empty)
-                                  + canonical_headers + "\n"
-                                  + signed_headers + "\n"
-                                  + payload_hash;
-    
+        + path_only + "\n"
+        + canonical_query_string + "\n"
+        + canonical_headers + "\n"
+        + signed_headers + "\n"
+        + payload_hash;
+
     // 5. Create string to sign
     std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
     std::string string_to_sign = "AWS4-HMAC-SHA256\n"
@@ -511,18 +659,18 @@ std::optional<std::string> authenticator::get_timestamp(
     return std::nullopt;
 }
 
-bool authenticator::is_timestamp_valid(const std::string& timestamp_str) const {
-    // Проверяем, что временная метка не старше 15 минут
-    try {
-        // Парсим временну́ю метку (формат: YYYYMMDDTHHMMSSZ)
-        // TODO: Реализовать парсинг ISO 8601
-        auto now = std::chrono::system_clock::now();
-        auto fifteen_minutes_ago = now - std::chrono::minutes(15);
+// bool authenticator::is_timestamp_valid(const std::string& timestamp_str) const {
+//     // Проверяем, что временная метка не старше 15 минут
+//     try {
+//         // Парсим временну́ю метку (формат: YYYYMMDDTHHMMSSZ)
+//         // TODO: Реализовать парсинг ISO 8601
+//         auto now = std::chrono::system_clock::now();
+//         auto fifteen_minutes_ago = now - std::chrono::minutes(15);
         
-        // Для простоты принимаем все временные метки в пределах 15 минут
-        return true;
+//         // Для простоты принимаем все временные метки в пределах 15 минут
+//         return true;
         
-    } catch (...) {
-        return false;
-    }
-}
+//     } catch (...) {
+//         return false;
+//     }
+// }
