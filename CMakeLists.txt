@@ -23,6 +23,7 @@ set(sources
     backend/src/authenticator.cpp
     backend/src/authorizer.cpp
     backend/src/rate_limiter.cpp
+    backend/src/path_utils.cpp
 )
 
 # Заголовки

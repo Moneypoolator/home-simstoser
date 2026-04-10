@@ -5,11 +5,147 @@
 #include <glog/logging.h>
 #include "logging.hpp"
 
+
+#include <fstream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
 authorizer::authorizer() {
     LOG(INFO) << "Authorizer initialized";
 }
 
 // ========== Управление пользователями ==========
+
+
+// Вспомогательная функция для преобразования времени в строку ISO 8601
+static std::string timepoint_to_iso8601(const std::chrono::system_clock::time_point& tp) {
+    std::time_t tt = std::chrono::system_clock::to_time_t(tp);
+    std::tm* gmt = std::gmtime(&tt);
+    std::stringstream ss;
+    ss << std::put_time(gmt, "%Y-%m-%dT%H:%M:%SZ");
+    return ss.str();
+}
+
+// Вспомогательная функция для парсинга ISO 8601 в time_point
+static std::optional<std::chrono::system_clock::time_point> iso8601_to_timepoint(const std::string& str) {
+    std::tm tm = {};
+    std::istringstream ss(str);
+    ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    if (ss.fail()) {
+        return std::nullopt;
+    }
+    std::time_t time = std::mktime(&tm);
+    return std::chrono::system_clock::from_time_t(time);
+}
+
+bool authorizer::load_users(const std::string& filepath) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    std::ifstream file(filepath);
+    if (!file) {
+        LOG(WARNING) << "Users file not found: " << filepath;
+        return false;
+    }
+    
+    try {
+        json data = json::parse(file);
+        if (!data.is_array()) {
+            LOG(ERROR) << "Users file must contain a JSON array";
+            return false;
+        }
+        
+        _users.clear();
+        for (const auto& item : data) {
+            user u;
+            
+            // user_id (опционально, генерируем если нет)
+            if (item.contains("user_id") && item["user_id"].is_string()) {
+                u.user_id = item["user_id"];
+            } else {
+                u.user_id = generate_id();
+            }
+            
+            // username (обязателен)
+            if (!item.contains("username") || !item["username"].is_string()) {
+                LOG(WARNING) << "Skipping user entry: missing username";
+                continue;
+            }
+            u.username = item["username"];
+            
+            // email (опционально)
+            if (item.contains("email") && item["email"].is_string()) {
+                u.email = item["email"];
+            }
+            
+            // role (опционально, по умолчанию VIEWER)
+            if (item.contains("role") && item["role"].is_string()) {
+                auto role_opt = parse_role(item["role"]);
+                u.role = role_opt.value_or(user_role::VIEWER);
+            } else {
+                u.role = user_role::VIEWER;
+            }
+            
+            // is_active (опционально, по умолчанию true)
+            u.is_active = true;
+            if (item.contains("is_active") && item["is_active"].is_boolean()) {
+                u.is_active = item["is_active"];
+            }
+            
+            // created_at (опционально, иначе текущее время)
+            u.created_at = std::chrono::system_clock::now();
+            if (item.contains("created_at") && item["created_at"].is_string()) {
+                auto tp = iso8601_to_timepoint(item["created_at"]);
+                if (tp) u.created_at = *tp;
+            }
+            
+            // last_login (опционально, иначе created_at)
+            u.last_login = u.created_at;
+            if (item.contains("last_login") && item["last_login"].is_string()) {
+                auto tp = iso8601_to_timepoint(item["last_login"]);
+                if (tp) u.last_login = *tp;
+            }
+            
+            _users[u.user_id] = u;
+            LOG(INFO) << "Loaded user: " << u.username 
+                      << " (ID: " << u.user_id 
+                      << ", role: " << role_to_string(u.role) << ")";
+        }
+        
+        LOG(INFO) << "Loaded " << _users.size() << " users from " << filepath;
+        return true;
+    } catch (const json::exception& e) {
+        LOG(ERROR) << "Failed to parse users file: " << e.what();
+        return false;
+    }
+}
+
+bool authorizer::save_users(const std::string& filepath) const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    json data = json::array();
+    for (const auto& [id, u] : _users) {
+        json item;
+        item["user_id"] = u.user_id;
+        item["username"] = u.username;
+        item["email"] = u.email;
+        item["role"] = role_to_string(u.role);
+        item["is_active"] = u.is_active;
+        item["created_at"] = timepoint_to_iso8601(u.created_at);
+        item["last_login"] = timepoint_to_iso8601(u.last_login);
+        data.push_back(item);
+    }
+    
+    std::ofstream file(filepath);
+    if (!file) {
+        LOG(ERROR) << "Failed to open users file for writing: " << filepath;
+        return false;
+    }
+    
+    file << data.dump(4);
+    LOG(INFO) << "Saved " << _users.size() << " users to " << filepath;
+    return true;
+}
 
 std::optional<user> authorizer::create_user(
     const std::string& username,

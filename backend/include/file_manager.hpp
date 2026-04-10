@@ -107,7 +107,6 @@ public:
     // Получить прогресс стриминговой загрузки (размер записанных данных)
     std::optional<std::uintmax_t> get_stream_upload_progress(const std::string& stream_id) const;
 
-    static bool is_path_safe(const fs::path& storage_dir, const std::string& filename);
     fs::path get_full_path(const std::string& filename) const;
 
     bool upload_file_stream(const std::string& filename, std::istream& data);
@@ -119,6 +118,7 @@ public:
 
 private:
     fs::path _storage_dir;
+    fs::path _storage_dir_canonical; // закэшированный канонический путь
     mutable std::mutex _mutex;
     std::map<std::string, multipart_upload> _active_uploads;
     std::map<std::string, stream_upload> _active_stream_uploads;

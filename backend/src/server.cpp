@@ -42,9 +42,13 @@ s3_server::s3_server(const std::string& address,
     if (!_users_file.empty()) {
         _authorizer = std::make_unique<authorizer>();
         _authorization_enabled = true;
+
+        if (!_authorizer->load_users(_users_file)) {
+            LOG(WARNING) << "Failed to load users from " << _users_file
+                         << ", starting with empty user list";
+        }
+
         LOG(INFO) << "Authorization enabled with users file: " << _users_file;
-        
-        // TODO: Загрузка пользователей из файла
     }
     
     if (_ssl_enabled) {
@@ -76,6 +80,9 @@ s3_server::s3_server(const std::string& address,
 
 s3_server::~s3_server()
 {
+    if (_authorizer && !_users_file.empty()) {
+        _authorizer->save_users(_users_file);
+    }
     stop();
 }
 

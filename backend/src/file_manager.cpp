@@ -7,14 +7,25 @@
 #include <openssl/evp.h>
 #include <random>
 #include <algorithm>
+
 #include <glog/logging.h>
+
+#include "path_utils.hpp"
 #include "logging.hpp"
+
 
 file_manager::file_manager(const std::string& storage_path)
     : _storage_dir(storage_path)
 {
     // Создаем директорию для хранения, если она не существует
     fs::create_directories(_storage_dir);
+    // Вычисляем канонический путь один раз при инициализации
+    try {
+        _storage_dir_canonical = fs::canonical(_storage_dir);
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "Cannot resolve canonical path for storage dir: " << e.what();
+        _storage_dir_canonical = fs::weakly_canonical(_storage_dir);
+    }
     LOG(INFO) << "File manager initialized. Storage path: " << _storage_dir.string();
 }
 
@@ -417,40 +428,8 @@ std::string file_manager::compute_etag(const fs::path& file_path) const
     return compute_etag(data);
 }
 
-
-bool file_manager::is_path_safe(const fs::path& storage_dir, const std::string& filename) 
-{
-    // Проверка на пустое имя
-    if (filename.empty()) {
-        return false;
-    }
-    
-    // Проверка на попытку выхода за пределы хранилища (path traversal)
-    fs::path path(filename);
-    
-    // Проверяем, что путь не содержит ".."
-    for (const auto& part : path) {
-        if (part == ".." || part == "/") {
-            return false;
-        }
-    }
-    
-    // Проверяем, что путь не абсолютный
-    if (path.is_absolute()) {
-        return false;
-    }
-    
-    // Проверяем, что результирующий путь остается внутри _storage_dir
-    fs::path resolved = fs::weakly_canonical(storage_dir / path);
-    fs::path base = fs::weakly_canonical(storage_dir);
-    
-    // Проверяем, что resolved начинается с base
-    return resolved.string().substr(0, base.string().length()) == base.string();
-}
-
-bool file_manager::is_path_safe(const std::string& filename) const
-{
-    return is_path_safe(_storage_dir, filename);
+bool file_manager::is_path_safe(const std::string& filename) const {
+    return path_utils::is_path_safe(_storage_dir, filename);
 }
 
 fs::path file_manager::get_full_path(const std::string& filename) const {

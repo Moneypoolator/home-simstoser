@@ -195,6 +195,12 @@ public:
     
     // Проверить соответствие паттерна пути
     static bool matches_pattern(const std::string& path, const std::string& pattern);
+
+    // Загрузить пользователей из JSON-файла
+    bool load_users(const std::string& filepath);
+    
+    // Сохранить пользователей в JSON-файл
+    bool save_users(const std::string& filepath) const;
     
 private:
     mutable std::recursive_mutex _mutex;
