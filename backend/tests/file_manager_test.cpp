@@ -433,3 +433,122 @@ TEST_F(FileManagerTest, StreamUploadWithSubdirectory) {
     ASSERT_TRUE(downloaded.has_value());
     EXPECT_EQ(downloaded.value(), data);
 }
+
+// ========== ТЕСТЫ ЛИМИТОВ ==========
+
+TEST_F(FileManagerTest, MaxFileSizeLimitExceeded) {
+    // Создаём file_manager с маленьким лимитом (1 KB)
+    upload_limits small_limits;
+    small_limits.max_file_size = 1024; // 1 KB
+    file_manager fm_small(_temp_dir.string(), small_limits);
+    
+    std::vector<char> data(2048, 'A'); // 2 KB
+    bool uploaded = fm_small.upload_file("large.txt", data);
+    EXPECT_FALSE(uploaded);
+    EXPECT_FALSE(fm_small.file_exists("large.txt"));
+}
+
+TEST_F(FileManagerTest, MaxFileSizeLimitRespected) {
+    upload_limits small_limits;
+    small_limits.max_file_size = 2048;
+    file_manager fm_small(_temp_dir.string(), small_limits);
+    
+    std::vector<char> data(1024, 'B');
+    bool uploaded = fm_small.upload_file("ok.txt", data);
+    EXPECT_TRUE(uploaded);
+    EXPECT_TRUE(fm_small.file_exists("ok.txt"));
+}
+
+TEST_F(FileManagerTest, MaxPartSizeLimitExceeded) {
+    upload_limits limits;
+    limits.max_part_size = 1024;
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    auto upload_id = fm_limits.initiate_multipart_upload("multi.bin");
+    ASSERT_TRUE(upload_id.has_value());
+    
+    std::vector<char> large_part(2048, 'C');
+    bool part_uploaded = fm_limits.upload_part(*upload_id, 1, large_part);
+    EXPECT_FALSE(part_uploaded);
+    
+    fm_limits.abort_multipart_upload(*upload_id);
+}
+
+TEST_F(FileManagerTest, MaxPartsPerUploadLimit) {
+    upload_limits limits;
+    limits.max_parts_per_upload = 2;
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    auto upload_id = fm_limits.initiate_multipart_upload("many_parts.bin");
+    ASSERT_TRUE(upload_id.has_value());
+    
+    // Загружаем первую часть
+    std::vector<char> part_data(100, 'D');
+    bool part1 = fm_limits.upload_part(*upload_id, 1, part_data);
+    EXPECT_TRUE(part1);
+    
+    // Вторая часть
+    bool part2 = fm_limits.upload_part(*upload_id, 2, part_data);
+    EXPECT_TRUE(part2);
+    
+    // Третья часть – должна быть отклонена
+    bool part3 = fm_limits.upload_part(*upload_id, 3, part_data);
+    EXPECT_FALSE(part3);
+    
+    fm_limits.abort_multipart_upload(*upload_id);
+}
+
+TEST_F(FileManagerTest, MaxTempStorageTotalLimit) {
+    upload_limits limits;
+    limits.max_temp_storage_total = 1024; // всего 1 KB временных файлов
+    limits.max_part_size = 1024; // allow 600-byte parts
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    // Первая загрузка
+    auto upload_id1 = fm_limits.initiate_multipart_upload("file1.bin");
+    ASSERT_TRUE(upload_id1.has_value());
+    std::vector<char> part1(600, 'E'); // 600 байт
+    bool uploaded1 = fm_limits.upload_part(*upload_id1, 1, part1);
+    EXPECT_TRUE(uploaded1); // 600 < 1024
+    
+    // Вторая загрузка (ещё 600 байт → превышение)
+    auto upload_id2 = fm_limits.initiate_multipart_upload("file2.bin");
+    ASSERT_TRUE(upload_id2.has_value());
+    std::vector<char> part2(600, 'F');
+    bool uploaded2 = fm_limits.upload_part(*upload_id2, 1, part2);
+    EXPECT_FALSE(uploaded2); // лимит временных файлов превышен
+    
+    fm_limits.abort_multipart_upload(*upload_id1);
+    fm_limits.abort_multipart_upload(*upload_id2);
+}
+
+TEST_F(FileManagerTest, StreamUploadMaxFileSizeLimit) {
+    upload_limits limits;
+    limits.max_file_size = 1024;
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    auto stream_id = fm_limits.initiate_stream_upload("stream.bin");
+    ASSERT_TRUE(stream_id.has_value());
+    
+    std::vector<char> data1(600, 'G');
+    bool written1 = fm_limits.write_to_stream(*stream_id, data1);
+    EXPECT_TRUE(written1);
+    
+    std::vector<char> data2(500, 'H');
+    bool written2 = fm_limits.write_to_stream(*stream_id, data2);
+    EXPECT_FALSE(written2); // превышение 1024 (600+500=1100)
+    
+    fm_limits.abort_stream_upload(*stream_id);
+}
+
+TEST_F(FileManagerTest, UploadFileStreamRespectsLimit) {
+    upload_limits limits;
+    limits.max_file_size = 512;
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    std::string content(600, 'I');
+    std::stringstream ss(content);
+    bool uploaded = fm_limits.upload_file_stream("stream_test.txt", ss);
+    EXPECT_FALSE(uploaded);
+    EXPECT_FALSE(fm_limits.file_exists("stream_test.txt"));
+}

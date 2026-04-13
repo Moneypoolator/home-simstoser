@@ -208,3 +208,44 @@ TEST_F(RequestHandlerTest, HandlePutDeleteGetSequence) {
     http::response<http::string_body> get_response = _handler->handle_get(get_req);
     EXPECT_EQ(get_response.result(), http::status::not_found);
 }
+
+TEST_F(RequestHandlerTest, HandlePutFileTooLarge) {
+    // Создаём file_manager с маленьким лимитом
+    upload_limits small_limits;
+    small_limits.max_file_size = 10; // 10 байт
+    file_manager fm_small(_temp_dir.string(), small_limits);
+    request_handler handler_small(fm_small);
+    
+    http::request<http::string_body> req{http::verb::put, "/large.txt", 11};
+    req.body() = "This is more than 10 bytes";
+    req.prepare_payload();
+    
+    http::response<http::string_body> response = handler_small.handle_put(req);
+    // Ожидаем, что file_manager вернёт false, и handler вернёт 500 (Internal Server Error)
+    // Или можно ожидать 413, если мы доработаем обработку ошибок.
+    // Пока в коде handle_put при ошибке upload_file возвращает 500.
+    EXPECT_EQ(response.result(), http::status::internal_server_error);
+}
+
+// Аналогично для multipart upload
+TEST_F(RequestHandlerTest, HandleUploadPartTooLarge) {
+    upload_limits small_limits;
+    small_limits.max_part_size = 10;
+    file_manager fm_small(_temp_dir.string(), small_limits);
+    request_handler handler_small(fm_small);
+    
+    // Инициируем загрузку
+    auto upload_id = fm_small.initiate_multipart_upload("multi.txt");
+    ASSERT_TRUE(upload_id.has_value());
+    
+    // Формируем запрос на загрузку части с большими данными
+    std::string target = "/upload/part?upload_id=" + *upload_id + "&part_number=1";
+    http::request<http::string_body> req{http::verb::put, target, 11};
+    req.body() = "This part is too long";
+    req.prepare_payload();
+    
+    http::response<http::string_body> response = handler_small.handle_upload_part(req);
+    EXPECT_EQ(response.result(), http::status::internal_server_error);
+    
+    fm_small.abort_multipart_upload(*upload_id);
+}

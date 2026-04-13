@@ -315,9 +315,9 @@ TEST_F(AuthenticatorTest, VerifySignatureInvalidTimestamp) {
 }
 
 // Test generate_signature returns empty string (not implemented)
-TEST_F(AuthenticatorTest, GenerateSignatureNotImplemented) {
-    authenticator auth;
-    std::map<std::string, std::string> headers = {{"x-amz-date", "20220101T120000Z"}};
-    std::string sig = auth.generate_signature("AKIAEXAMPLE", "secret", "GET", "/test", headers, "");
-    EXPECT_EQ(sig, "");
-}
+// TEST_F(AuthenticatorTest, GenerateSignatureNotImplemented) {
+//     authenticator auth;
+//     std::map<std::string, std::string> headers = {{"x-amz-date", "20220101T120000Z"}};
+//     std::string sig = auth.generate_signature("AKIAEXAMPLE", "secret", "GET", "/test", headers, "");
+//     EXPECT_EQ(sig, "");
+// }

@@ -461,6 +461,23 @@ http::response<http::string_body> request_handler::handle_get(
 {
     std::string filename = get_filename_from_path(std::string(req.target()));
     if (filename.empty()) {
+        // Check if this is a /list API request
+        std::string target = std::string(req.target());
+        // Normalize path similar to get_filename_from_path
+        std::string clean_path = target;
+        size_t query_pos = clean_path.find('?');
+        if (query_pos != std::string::npos) {
+            clean_path = clean_path.substr(0, query_pos);
+        }
+        if (!clean_path.empty() && clean_path[0] == '/') {
+            clean_path = clean_path.substr(1);
+        }
+        if (clean_path.compare(0, 4, "api/") == 0) {
+            clean_path = clean_path.substr(4);
+        }
+        if (clean_path == "list") {
+            return handle_list(req);
+        }
         return create_response(http::status::bad_request, R"({"error": "Filename required"})");
     }
     

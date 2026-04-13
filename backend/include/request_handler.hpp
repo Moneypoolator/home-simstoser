@@ -191,6 +191,7 @@ public:
     http::response<http::string_body> handle_delete(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_list(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_get_progress(const http::request<http::string_body>& req);
+
     http::response<http::string_body> create_response(
         http::status status,
         const std::string& body = "",
@@ -199,6 +200,7 @@ public:
     std::string get_filename_from_path(const std::string& path) const;
 
     http::response<http::file_body> handle_get_file_body(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
 
 private:
     friend class RequestHandlerTest;
@@ -255,7 +257,7 @@ private:
     
     // Multipart upload handlers
     http::response<http::string_body> handle_initiate_upload(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
+    // http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_complete_upload(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_abort_upload(const http::request<http::string_body>& req);
     
