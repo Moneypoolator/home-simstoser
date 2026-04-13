@@ -14,8 +14,8 @@
 #include "logging.hpp"
 
 
-file_manager::file_manager(const std::string& storage_path)
-    : _storage_dir(storage_path)
+file_manager::file_manager(const std::string& storage_path, const upload_limits& limits)
+    : _storage_dir(storage_path), _limits(limits)
 {
     // Создаем директорию для хранения, если она не существует
     fs::create_directories(_storage_dir);
@@ -41,8 +41,33 @@ file_manager::~file_manager()
     VLOG(1) << "File manager destroyed";
 }
 
+uint64_t file_manager::get_current_temp_storage_usage() const {
+    uint64_t total = 0;
+    for (const auto& [id, upload] : _active_uploads) {
+        if (!upload.completed) {
+            for (const auto& part : upload.parts) {
+                fs::path part_path = upload.temp_dir / part;
+                if (fs::exists(part_path)) {
+                    total += fs::file_size(part_path);
+                }
+            }
+        }
+    }
+    for (const auto& [id, stream] : _active_stream_uploads) {
+        if (!stream.completed && fs::exists(stream.temp_file)) {
+            total += fs::file_size(stream.temp_file);
+        }
+    }
+    return total;
+}
 
 bool file_manager::upload_file(const std::string& filename, const std::vector<char>& data) {
+
+    if (data.size() > _limits.max_file_size) {
+        LOG(ERROR) << "File size exceeds limit: " << data.size() << " > " << _limits.max_file_size;
+        return false;
+    }
+
     // Превращаем вектор в поток
     std::stringstream ss;
     ss.write(data.data(), data.size());
@@ -170,6 +195,15 @@ std::optional<std::string> file_manager::initiate_multipart_upload(const std::st
         return std::nullopt;
     }
 
+    // Проверяем, не превысит ли потенциальный файл лимит (можно по желанию)
+    // Также проверяем общий объём временных файлов
+    uint64_t current_temp = get_current_temp_storage_usage();
+    if (current_temp >= _limits.max_temp_storage_total) {
+        LOG(ERROR) << "Temporary storage limit reached: " << current_temp
+                   << " >= " << _limits.max_temp_storage_total;
+        return std::nullopt;
+    }
+
     std::lock_guard<std::mutex> lock(_mutex);
     
     // Генерируем уникальный ID загрузки
@@ -205,6 +239,7 @@ bool file_manager::upload_part(
         return false;
     }
 
+
     std::lock_guard<std::mutex> lock(_mutex);
     
     auto upload_opt = get_upload(upload_id);
@@ -214,6 +249,27 @@ bool file_manager::upload_part(
     }
     
     multipart_upload* upload = *upload_opt;
+
+    // Проверка размера части
+    if (data.size() > _limits.max_part_size) {
+        LOG(ERROR) << "Part size exceeds limit: " << data.size() << " > " << _limits.max_part_size;
+        return false;
+    }
+
+    // Проверка количества частей
+    if (upload->parts.size() >= _limits.max_parts_per_upload) {
+        LOG(ERROR) << "Too many parts for upload " << upload_id
+                   << ": " << upload->parts.size() << " >= " << _limits.max_parts_per_upload;
+        return false;
+    }
+
+    // Проверка суммарного объёма временных файлов
+    uint64_t new_part_size = data.size();
+    uint64_t current_usage = get_current_temp_storage_usage();
+    if (current_usage + new_part_size > _limits.max_temp_storage_total) {
+        LOG(ERROR) << "Adding part would exceed temp storage limit";
+        return false;
+    }
     
     // Формируем имя файла для части
     std::ostringstream part_name;
@@ -301,6 +357,27 @@ bool file_manager::complete_multipart_upload(
     }
     
     multipart_upload* upload = *upload_opt;
+    
+    // Проверяем общий размер файла
+    uint64_t total_size = 0;
+    for (int part_number : part_numbers) {
+        std::ostringstream part_name;
+        part_name << "part_" << std::setw(5) << std::setfill('0') << part_number;
+        fs::path part_path = upload->temp_dir / part_name.str();
+        
+        if (!fs::exists(part_path)) {
+            LOG(ERROR) << "Missing part: " << part_path;
+            return false;
+        }
+        
+        total_size += fs::file_size(part_path);
+    }
+    
+    if (total_size > _limits.max_file_size) {
+        LOG(ERROR) << "Total file size exceeds limit: " << total_size
+                   << " > " << _limits.max_file_size;
+        return false;
+    }
     
     // Объединяем части
     if (!merge_parts(*upload, part_numbers)) {
@@ -562,6 +639,14 @@ std::optional<std::string> file_manager::initiate_stream_upload(const std::strin
 
     std::lock_guard<std::mutex> lock(_mutex);
     
+    // Проверяем текущее использование временного хранилища
+    uint64_t current_temp = get_current_temp_storage_usage();
+    if (current_temp >= _limits.max_temp_storage_total) {
+        LOG(ERROR) << "Temporary storage limit reached: " << current_temp
+                   << " >= " << _limits.max_temp_storage_total;
+        return std::nullopt;
+    }
+    
     // Генерируем уникальный ID загрузки
     std::string stream_id = generate_upload_id();
     
@@ -615,6 +700,16 @@ bool file_manager::write_to_stream(
     
     if (upload.completed) {
         LOG(WARNING) << "Attempt to write to completed stream: " << stream_id;
+        return false;
+    }
+
+    uint64_t current_usage = get_current_temp_storage_usage();
+    if (current_usage + data.size() > _limits.max_temp_storage_total) {
+        LOG(ERROR) << "Stream write would exceed temp storage limit";
+        return false;
+    }
+    if (upload.bytes_written + data.size() > _limits.max_file_size) {
+        LOG(ERROR) << "Stream would exceed max file size";
         return false;
     }
     
@@ -778,7 +873,8 @@ void file_manager::cleanup_stream_upload(const std::string& stream_id)
     _active_stream_uploads.erase(stream_id);
 }
 
-bool file_manager::upload_file_stream(const std::string& filename, std::istream& data) {
+bool file_manager::upload_file_stream(const std::string& filename, std::istream& data)
+{
     if (!is_path_safe(filename)) {
         LOG(WARNING) << "Unsafe path: " << filename;
         return false;
@@ -797,16 +893,29 @@ bool file_manager::upload_file_stream(const std::string& filename, std::istream&
         // Буфер 1 MB
         constexpr size_t buffer_size = 1024 * 1024;
         std::vector<char> buffer(buffer_size);
+        uint64_t total_written = 0;
         
         while (data) {
             data.read(buffer.data(), buffer_size);
             std::streamsize bytes = data.gcount();
             if (bytes > 0) {
+                // Проверяем лимит размера файла
+                if (total_written + static_cast<uint64_t>(bytes) > _limits.max_file_size) {
+                    LOG(ERROR) << "File size limit exceeded: "
+                               << total_written + static_cast<uint64_t>(bytes)
+                               << " > " << _limits.max_file_size;
+                    file.close();
+                    // Удаляем частично записанный файл
+                    fs::remove(file_path);
+                    return false;
+                }
+                
                 file.write(buffer.data(), bytes);
                 if (!file) {
                     LOG(ERROR) << "Write error during upload: " << filename;
                     return false;
                 }
+                total_written += static_cast<uint64_t>(bytes);
             }
         }
         

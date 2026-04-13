@@ -39,9 +39,17 @@ struct stream_upload {
     bool completed = false;
 };
 
+struct upload_limits {
+    size_t max_file_size = 1024 * 1024 * 1024;      // 1 GB по умолчанию
+    size_t max_part_size = 100 * 1024 * 1024;       // 100 MB на часть
+    size_t max_parts_per_upload = 10000;            // AWS S3 лимит
+    size_t max_temp_storage_total = 10 * 1024 * 1024 * 1024ULL; // 10 GB суммарно для временных файлов
+};
+
 class file_manager {
 public:
-    explicit file_manager(const std::string& storage_path);
+    explicit file_manager(const std::string& storage_path,
+                          const upload_limits& limits = upload_limits());
     ~file_manager();
 
     // Загрузка файла
@@ -122,6 +130,10 @@ private:
     mutable std::mutex _mutex;
     std::map<std::string, multipart_upload> _active_uploads;
     std::map<std::string, stream_upload> _active_stream_uploads;
+
+    upload_limits _limits;
+    // Функция для подсчёта текущего объёма временных файлов
+    uint64_t get_current_temp_storage_usage() const;
     
    // Вычисление ETag из данных
     std::string compute_etag(const std::vector<char>& data) const;

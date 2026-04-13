@@ -9,12 +9,13 @@
 namespace ssl = asio::ssl;
 
 s3_server::s3_server(const std::string& address,
-                     unsigned short port,
-                     const std::string& storage_path,
-                     const std::string& keys_file,
-                     const std::string& users_file,
-                     std::optional<ssl_config> ssl_cfg,
-                     std::optional<cors_config> cors_cfg)
+    unsigned short port,
+    const std::string& storage_path,
+    const std::string& keys_file,
+    const std::string& users_file,
+    std::optional<ssl_config> ssl_cfg,
+    std::optional<cors_config> cors_cfg,
+    upload_limits_config upload_limits)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
@@ -23,6 +24,7 @@ s3_server::s3_server(const std::string& address,
     , _acceptor(_io_context)
     , _ssl_config(std::move(ssl_cfg))
     , _cors_config(std::move(cors_cfg))
+    , _upload_limits(std::move(upload_limits))
 {
     _ssl_enabled = _ssl_config.has_value();
     
@@ -363,7 +365,14 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
             client_info
         );
         
-        file_manager fm(_storage_path);
+        // Создаем менеджер файлов с ограничениями загрузки
+        upload_limits limits = {
+            _upload_limits.max_file_size,
+            _upload_limits.max_part_size,
+            _upload_limits.max_parts_per_upload,
+            _upload_limits.max_temp_storage_total
+        };
+        file_manager fm(_storage_path, limits);
         request_handler handler(fm, _authenticator.get(), _authorizer.get());
         handler.set_auth_enabled(_auth_enabled);
         handler.set_authorization_enabled(_authorization_enabled);
@@ -510,7 +519,14 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
             client_info
         );
         
-        file_manager fm(_storage_path);
+        // Создаем менеджер файлов с ограничениями загрузки
+        upload_limits limits = {
+            _upload_limits.max_file_size,
+            _upload_limits.max_part_size,
+            _upload_limits.max_parts_per_upload,
+            _upload_limits.max_temp_storage_total
+        };
+        file_manager fm(_storage_path, limits);
         request_handler handler(fm, _authenticator.get(), _authorizer.get());
         handler.set_auth_enabled(_auth_enabled);
         handler.set_authorization_enabled(_authorization_enabled);

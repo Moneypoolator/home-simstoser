@@ -19,6 +19,13 @@ namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 // namespace ssl = asio::ssl;
 
+    struct upload_limits_config {
+        size_t max_file_size = 1024 * 1024 * 1024;
+        size_t max_part_size = 100 * 1024 * 1024;
+        size_t max_parts_per_upload = 10000;
+        size_t max_temp_storage_total = 10ULL * 1024 * 1024 * 1024;
+    };
+
 class s3_server {
 public:
     struct ssl_config {
@@ -99,7 +106,8 @@ public:
               const std::string& keys_file = "",
               const std::string& users_file = "",
               std::optional<ssl_config> ssl_cfg = std::nullopt,
-              std::optional<cors_config> cors_cfg = std::nullopt);
+              std::optional<cors_config> cors_cfg = std::nullopt,
+              upload_limits_config upload_limits = upload_limits_config());
     
     ~s3_server();
     
@@ -128,6 +136,8 @@ private:
     std::unique_ptr<authenticator> _authenticator;
     std::unique_ptr<authorizer> _authorizer;
     std::unique_ptr<rate_limiter> _rate_limiter;
+
+    upload_limits_config _upload_limits;
     
     void do_accept();
     void handle_session(tcp::socket socket, const std::string& client_ip = "");

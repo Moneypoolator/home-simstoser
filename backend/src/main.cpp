@@ -158,7 +158,13 @@ int main(int argc, char* argv[])
     std::vector<std::string> cors_exposed_headers = {"ETag", "X-File-Size", "X-Upload-Id"};
     bool cors_allow_credentials = false;
     int cors_max_age = 86400; // 24 hours
-    
+
+    upload_limits_config default_limits;
+    default_limits.max_file_size = 5ULL * 1024 * 1024 * 1024; // 5 GB
+    default_limits.max_part_size = 100 * 1024 * 1024; // 100 MB
+    default_limits.max_parts_per_upload = 10000; // как в S3
+    default_limits.max_temp_storage_total = 20ULL * 1024 * 1024 * 1024; // 20 GB
+
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -177,41 +183,44 @@ int main(int argc, char* argv[])
         }
         else if (arg == "--users" || arg == "-u") {
             if (i + 1 < argc) users_file = argv[++i];
-        }
-        else if (arg == "--no-auth") {
+        } else if (arg == "--max-file-size") {
+            if (i + 1 < argc)
+                default_limits.max_file_size = std::stoull(argv[++i]);
+        } else if (arg == "--max-part-size") {
+            if (i + 1 < argc)
+                default_limits.max_part_size = std::stoull(argv[++i]);
+        } else if (arg == "--max-parts") {
+            if (i + 1 < argc)
+                default_limits.max_parts_per_upload = std::stoull(argv[++i]);
+        } else if (arg == "--max-temp-storage") {
+            if (i + 1 < argc)
+                default_limits.max_temp_storage_total = std::stoull(argv[++i]);
+        } else if (arg == "--no-auth") {
             enable_auth = false;
-        }
-        else if (arg == "--ssl" || arg == "-S") {
+        } else if (arg == "--ssl" || arg == "-S") {
             use_ssl = true;
             enable_ssl = true;
-        }
-        else if (arg == "--cert") {
+        } else if (arg == "--cert") {
             if (i + 1 < argc) cert_file = argv[++i];
-        }
-        else if (arg == "--key") {
+        } else if (arg == "--key") {
             if (i + 1 < argc) key_file = argv[++i];
-        }
-        else if (arg == "--letsencrypt" || arg == "-L") {
+        } else if (arg == "--letsencrypt" || arg == "-L") {
             use_letsencrypt = true;
             use_ssl = true;
             enable_ssl = true;
             if (i + 1 < argc) letsencrypt_dir = argv[++i];
-        }
-        else if (arg == "--log-level" || arg == "-l") {
+        } else if (arg == "--log-level" || arg == "-l") {
             if (i + 1 < argc) {
                 int vlevel = std::stoi(argv[++i]);
                 FLAGS_v = vlevel;  // Уровень детализации glog
             }
-        }
-        else if (arg == "--log-dir") {
+        } else if (arg == "--log-dir") {
             if (i + 1 < argc) FLAGS_log_dir = argv[++i];
             // Создаем директорию при изменении
             fs::create_directories(FLAGS_log_dir);
-        }
-        else if (arg == "--no-cors") {
+        } else if (arg == "--no-cors") {
             enable_cors = false;
-        }
-        else if (arg == "--cors-origins") {
+        } else if (arg == "--cors-origins") {
             if (i + 1 < argc) {
                 std::string origins = argv[++i];
                 cors_origins.clear();
@@ -224,8 +233,7 @@ int main(int argc, char* argv[])
                     cors_origins.push_back(origins);
                 }
             }
-        }
-        else if (arg == "--cors-methods") {
+        } else if (arg == "--cors-methods") {
             if (i + 1 < argc) {
                 std::string methods = argv[++i];
                 cors_methods.clear();
@@ -238,8 +246,7 @@ int main(int argc, char* argv[])
                     cors_methods.push_back(methods);
                 }
             }
-        }
-        else if (arg == "--cors-headers") {
+        } else if (arg == "--cors-headers") {
             if (i + 1 < argc) {
                 std::string headers = argv[++i];
                 cors_headers.clear();
@@ -252,8 +259,7 @@ int main(int argc, char* argv[])
                     cors_headers.push_back(headers);
                 }
             }
-        }
-        else if (arg == "--cors-exposed-headers") {
+        } else if (arg == "--cors-exposed-headers") {
             if (i + 1 < argc) {
                 std::string exposed = argv[++i];
                 cors_exposed_headers.clear();
@@ -266,19 +272,16 @@ int main(int argc, char* argv[])
                     cors_exposed_headers.push_back(exposed);
                 }
             }
-        }
-        else if (arg == "--cors-credentials") {
+        } else if (arg == "--cors-credentials") {
             if (i + 1 < argc) {
                 std::string val = argv[++i];
                 cors_allow_credentials = (val == "true" || val == "1" || val == "yes");
             }
-        }
-        else if (arg == "--cors-max-age") {
+        } else if (arg == "--cors-max-age") {
             if (i + 1 < argc) {
                 cors_max_age = std::stoi(argv[++i]);
             }
-        }
-        else if (arg == "--help" || arg == "-h") {
+        } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
                       << "  -a, --address <addr>   Bind address (default: 0.0.0.0)\n"
@@ -298,6 +301,10 @@ int main(int argc, char* argv[])
                       << "      --cors-exposed-headers <list> Comma-separated exposed headers\n"
                       << "      --cors-credentials <bool>  Allow credentials (true/false, default: false)\n"
                       << "      --cors-max-age <seconds>   Preflight cache duration (default: 86400)\n"
+                      << "      --max-file-size <bytes>\n"
+                      << "      --max-part-size <bytes>\n"
+                      << "      --max-parts <number>\n"
+                      << "      --max-temp-storage <bytes>\n"
                       << "  -h, --help             Show this help message\n";
             logging::shutdown();
             return 0;
