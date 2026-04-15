@@ -7,6 +7,10 @@
 #include <ctime>
 #include <cstdio>
 #include <algorithm>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 namespace fs = std::filesystem;
 
@@ -31,18 +35,115 @@ void generate_self_signed_cert(const std::string& cert_file, const std::string& 
     // Создаем директорию для сертификатов
     fs::create_directories(fs::path(cert_file).parent_path());
     
-    // Генерируем самоподписанный сертификат с помощью OpenSSL
-    std::string cmd = "openssl req -x509 -newkey rsa:4096 -keyout " + key_file +
-                      " -out " + cert_file +
-                      " -days 365 -nodes -subj \"/CN=localhost\" 2>/dev/null";
+    // Инициализация OpenSSL
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
     
-    int result = std::system(cmd.c_str());
+    EVP_PKEY* pkey = nullptr;
+    X509* x509 = nullptr;
+    X509_NAME* name = nullptr;
+    FILE* fp = nullptr;
+    bool success = false;
     
-    if (result == 0) {
-        LOG(INFO) << "Self-signed certificate generated successfully";
-        LOG(INFO) << "Certificate: " << cert_file;
-        LOG(INFO) << "Private key: " << key_file;
-    } else {
+    // 1. Генерируем RSA ключ
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
+    if (!ctx) {
+        LOG(WARNING) << "Failed to create EVP_PKEY_CTX";
+        goto cleanup;
+    }
+    
+    if (EVP_PKEY_keygen_init(ctx) <= 0) {
+        LOG(WARNING) << "Failed to initialize key generation";
+        goto cleanup;
+    }
+    
+    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 4096) <= 0) {
+        LOG(WARNING) << "Failed to set RSA key length";
+        goto cleanup;
+    }
+    
+    if (EVP_PKEY_keygen(ctx, &pkey) <= 0) {
+        LOG(WARNING) << "Failed to generate RSA key";
+        goto cleanup;
+    }
+    
+    EVP_PKEY_CTX_free(ctx);
+    ctx = nullptr;
+    
+    // 2. Создаем X509 сертификат
+    x509 = X509_new();
+    if (!x509) {
+        LOG(WARNING) << "Failed to create X509 certificate";
+        goto cleanup;
+    }
+    
+    // Устанавливаем версию
+    X509_set_version(x509, 2); // X509v3
+    
+    // Серийный номер
+    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
+    
+    // Валидность: 365 дней
+    X509_gmtime_adj(X509_get_notBefore(x509), 0);
+    X509_gmtime_adj(X509_get_notAfter(x509), 365 * 24 * 60 * 60);
+    
+    // Устанавливаем публичный ключ
+    X509_set_pubkey(x509, pkey);
+    
+    // Устанавливаем subject и issuer (самоподписанный)
+    name = X509_get_subject_name(x509);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                               (const unsigned char*)"localhost", -1, -1, 0);
+    X509_set_issuer_name(x509, name);
+    
+    // Подписываем сертификат
+    if (X509_sign(x509, pkey, EVP_sha256()) <= 0) {
+        LOG(WARNING) << "Failed to sign certificate";
+        goto cleanup;
+    }
+    
+    // 3. Записываем приватный ключ в файл
+    fp = fopen(key_file.c_str(), "wb");
+    if (!fp) {
+        LOG(WARNING) << "Failed to open key file for writing: " << key_file;
+        goto cleanup;
+    }
+    
+    if (!PEM_write_PrivateKey(fp, pkey, nullptr, nullptr, 0, nullptr, nullptr)) {
+        LOG(WARNING) << "Failed to write private key";
+        fclose(fp);
+        goto cleanup;
+    }
+    fclose(fp);
+    fp = nullptr;
+    
+    // 4. Записываем сертификат в файл
+    fp = fopen(cert_file.c_str(), "wb");
+    if (!fp) {
+        LOG(WARNING) << "Failed to open certificate file for writing: " << cert_file;
+        goto cleanup;
+    }
+    
+    if (!PEM_write_X509(fp, x509)) {
+        LOG(WARNING) << "Failed to write certificate";
+        fclose(fp);
+        goto cleanup;
+    }
+    fclose(fp);
+    fp = nullptr;
+    
+    success = true;
+    LOG(INFO) << "Self-signed certificate generated successfully";
+    LOG(INFO) << "Certificate: " << cert_file;
+    LOG(INFO) << "Private key: " << key_file;
+    
+cleanup:
+    if (ctx) EVP_PKEY_CTX_free(ctx);
+    if (pkey) EVP_PKEY_free(pkey);
+    if (x509) X509_free(x509);
+    if (fp) fclose(fp);
+    
+    if (!success) {
         LOG(WARNING) << "Failed to generate self-signed certificate. Please create manually.";
         LOG(INFO) << "Use: openssl req -x509 -newkey rsa:4096 -keyout " << key_file
                   << " -out " << cert_file << " -days 365 -nodes -subj \"/CN=localhost\"";
@@ -56,44 +157,48 @@ bool is_certificate_expiring_soon(const std::string& cert_file, int days_thresho
         return true; // Certificate doesn't exist, needs generation
     }
     
-    // Use OpenSSL to check certificate expiration
-    std::string cmd = "openssl x509 -enddate -noout -in " + cert_file + " 2>/dev/null";
-    
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        LOG(WARNING) << "Failed to check certificate expiration";
+    FILE* fp = fopen(cert_file.c_str(), "r");
+    if (!fp) {
+        LOG(WARNING) << "Failed to open certificate file: " << cert_file;
         return false;
     }
     
-    char buffer[256];
-    std::string result;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        result += buffer;
-    }
-    pclose(pipe);
+    X509* cert = PEM_read_X509(fp, nullptr, nullptr, nullptr);
+    fclose(fp);
     
-    // Parse the date from output like "notAfter=Dec 31 23:59:59 2025 GMT"
-    size_t pos = result.find("notAfter=");
-    if (pos == std::string::npos) {
-        LOG(WARNING) << "Failed to parse certificate expiration date";
+    if (!cert) {
+        LOG(WARNING) << "Failed to parse certificate file: " << cert_file;
         return false;
     }
     
-    std::string date_str = result.substr(pos + 9); // Skip "notAfter="
-    // Remove trailing newline
-    date_str.erase(std::remove(date_str.begin(), date_str.end(), '\n'), date_str.end());
+    // Get notAfter time
+    const ASN1_TIME* not_after = X509_get0_notAfter(cert);
+    if (!not_after) {
+        LOG(WARNING) << "Certificate missing expiration date";
+        X509_free(cert);
+        return false;
+    }
     
-    // Convert date string to time_t
-    std::tm tm = {};
-    strptime(date_str.c_str(), "%b %d %H:%M:%S %Y GMT", &tm);
-    std::time_t expiration_time = std::mktime(&tm);
+    // Get current time as ASN1_TIME
+    time_t now = time(nullptr);
+    ASN1_TIME* now_asn1 = ASN1_TIME_new();
+    ASN1_TIME_set(now_asn1, now);
     
-    // Get current time
-    std::time_t current_time = std::time(nullptr);
+    // Calculate difference in days
+    int day_diff = 0, sec_diff = 0;
+    if (!ASN1_TIME_diff(&day_diff, &sec_diff, now_asn1, not_after)) {
+        LOG(WARNING) << "Failed to compute certificate expiration difference";
+        ASN1_TIME_free(now_asn1);
+        X509_free(cert);
+        return false;
+    }
     
-    // Calculate days until expiration
-    double seconds_until_expiration = std::difftime(expiration_time, current_time);
-    int days_until_expiration = static_cast<int>(seconds_until_expiration / (60 * 60 * 24));
+    ASN1_TIME_free(now_asn1);
+    X509_free(cert);
+    
+    // day_diff is number of days from now to notAfter (positive if notAfter is in future)
+    // If day_diff is negative, certificate is already expired
+    int days_until_expiration = day_diff;
     
     LOG(INFO) << "Certificate expires in " << days_until_expiration << " days";
     
