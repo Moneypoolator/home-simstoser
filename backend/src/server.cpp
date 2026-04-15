@@ -145,6 +145,21 @@ void s3_server::stop()
     
     _running = false;
     _acceptor.close();
+    
+    // Wait for active sessions to finish (graceful shutdown)
+    constexpr int shutdown_timeout_seconds = 30;
+    LOG(INFO) << "Waiting for active connections to finish (max " << shutdown_timeout_seconds << " seconds)...";
+    {
+        std::unique_lock<std::mutex> lock(_shutdown_mutex);
+        if (_shutdown_cv.wait_for(lock, std::chrono::seconds(shutdown_timeout_seconds),
+            [this]() { return _active_sessions == 0; })) {
+            LOG(INFO) << "All active connections closed gracefully";
+        } else {
+            LOG(WARNING) << "Timeout waiting for active connections, forcing shutdown";
+        }
+    }
+    
+    // Stop IO context and join worker threads
     _io_context.stop();
     
     for (auto& thread : _threads) {
@@ -285,6 +300,9 @@ std::shared_ptr<ssl::context> s3_server::setup_ssl_context()
 }
 
 void s3_server::handle_session(tcp::socket socket, const std::string& client_ip) {
+    // Increment active sessions counter
+    ++_active_sessions;
+    
     std::string client_info = client_ip;
     beast::error_code ec;
     
@@ -302,11 +320,20 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
         clean_ip = client_info.substr(0, colon_pos);
     }
     
+    // Decrement on exit
+    auto decrement_session = [this]() {
+        if (--_active_sessions == 0) {
+            std::lock_guard<std::mutex> lock(_shutdown_mutex);
+            _shutdown_cv.notify_all();
+        }
+    };
+    
     // Rate limiting для соединения
     if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
         if (!_rate_limiter->allow_connection(clean_ip)) {
             LOG(WARNING) << "Connection rate limit exceeded for IP: " << clean_ip;
             socket.close(ec);
+            decrement_session();
             return;
         }
         _rate_limiter->record_connection(clean_ip);
@@ -315,6 +342,11 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
     auto cleanup = [this, clean_ip]() {
         if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
             _rate_limiter->record_disconnection(clean_ip);
+        }
+        // Decrement active sessions counter
+        if (--_active_sessions == 0) {
+            std::lock_guard<std::mutex> lock(_shutdown_mutex);
+            _shutdown_cv.notify_all();
         }
     };
     
@@ -471,6 +503,9 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
 }
 
 void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::string& client_ip) {
+    // Increment active sessions counter
+    ++_active_sessions;
+    
     std::string client_info = client_ip;
     beast::error_code ec;
     
@@ -488,11 +523,20 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
         clean_ip = client_info.substr(0, colon_pos);
     }
     
+    // Decrement on exit
+    auto decrement_session = [this]() {
+        if (--_active_sessions == 0) {
+            std::lock_guard<std::mutex> lock(_shutdown_mutex);
+            _shutdown_cv.notify_all();
+        }
+    };
+    
     // Rate limiting для соединения
     if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
         if (!_rate_limiter->allow_connection(clean_ip)) {
             LOG(WARNING) << "SSL connection rate limit exceeded for IP: " << clean_ip;
             socket.next_layer().close(ec);
+            decrement_session();
             return;
         }
         _rate_limiter->record_connection(clean_ip);
@@ -501,6 +545,11 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
     auto cleanup = [this, clean_ip]() {
         if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
             _rate_limiter->record_disconnection(clean_ip);
+        }
+        // Decrement active sessions counter
+        if (--_active_sessions == 0) {
+            std::lock_guard<std::mutex> lock(_shutdown_mutex);
+            _shutdown_cv.notify_all();
         }
     };
     

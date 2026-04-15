@@ -6,6 +6,8 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <condition_variable>
+#include <mutex>
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/asio/ssl.hpp>
@@ -135,6 +137,10 @@ private:
     tcp::acceptor _acceptor;
     std::vector<std::thread> _threads;
     std::atomic<bool> _running{true};
+    std::atomic<int> _active_sessions{0};
+    std::mutex _shutdown_mutex;
+    std::condition_variable _shutdown_cv;
+    bool _shutdown_requested{false};
     
     std::optional<ssl_config> _ssl_config;
     std::optional<cors_config> _cors_config;
