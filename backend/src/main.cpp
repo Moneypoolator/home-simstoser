@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "logging.hpp"
+#include "config.hpp"
 #include <iostream>
 #include <csignal>
 #include <atomic>
@@ -256,39 +257,70 @@ int main(int argc, char* argv[])
     LOG(INFO) << "  S3-Compatible Storage Server";
     LOG(INFO) << "========================================";
     
-    // Параметры по умолчанию
-    std::string address = "0.0.0.0";
-    unsigned short port = 9000;
-    std::string storage_path = "./storage";
-    std::string keys_file = "./access_keys.csv";
-    std::string users_file = "./users.csv";
-    bool enable_auth = true;
-    bool enable_ssl = false;
+    // Load configuration from file if specified
+    std::string config_file;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--config" || arg == "-c") {
+            if (i + 1 < argc) {
+                config_file = argv[++i];
+            } else {
+                std::cerr << "Error: --config requires a file path" << std::endl;
+                return 1;
+            }
+            break;
+        }
+    }
     
-    bool use_ssl = false;
-    bool use_letsencrypt = false;
-    std::string cert_file = "./certs/server.crt";
-    std::string key_file = "./certs/server.key";
-    std::string letsencrypt_dir = "";
+    server_config cfg;
+    if (!config_file.empty()) {
+        try {
+            cfg = server_config::from_file(config_file);
+            LOG(INFO) << "Loaded configuration from " << config_file;
+        } catch (const std::exception& e) {
+            LOG(FATAL) << "Failed to load configuration file: " << e.what();
+            return 1;
+        }
+    }
+    
+    // Параметры по умолчанию (overridden by config)
+    std::string address = cfg.address;
+    unsigned short port = cfg.port;
+    std::string storage_path = cfg.storage_path;
+    std::string keys_file = cfg.keys_file;
+    std::string users_file = cfg.users_file;
+    bool enable_auth = cfg.enable_auth;
+    bool enable_ssl = cfg.enable_ssl;
+    
+    bool use_ssl = cfg.enable_ssl;
+    bool use_letsencrypt = cfg.use_letsencrypt;
+    std::string cert_file = cfg.ssl_cfg.has_value() ? cfg.ssl_cfg->cert_file : "./certs/server.crt";
+    std::string key_file = cfg.ssl_cfg.has_value() ? cfg.ssl_cfg->private_key : "./certs/server.key";
+    std::string letsencrypt_dir = cfg.letsencrypt_dir;
     
     // CORS configuration
-    bool enable_cors = true;
-    std::vector<std::string> cors_origins = {"*"};
-    std::vector<std::string> cors_methods = {"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"};
-    std::vector<std::string> cors_headers = {"Content-Type", "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Requested-With", "X-Access-Key"};
-    std::vector<std::string> cors_exposed_headers = {"ETag", "X-File-Size", "X-Upload-Id"};
-    bool cors_allow_credentials = false;
-    int cors_max_age = 86400; // 24 hours
+    bool enable_cors = cfg.cors_cfg.has_value();
+    std::vector<std::string> cors_origins = cfg.cors_cfg.has_value() ? cfg.cors_cfg->allowed_origins : std::vector<std::string>{"*"};
+    std::vector<std::string> cors_methods = cfg.cors_cfg.has_value() ? cfg.cors_cfg->allowed_methods : std::vector<std::string>{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"};
+    std::vector<std::string> cors_headers = cfg.cors_cfg.has_value() ? cfg.cors_cfg->allowed_headers : std::vector<std::string>{"Content-Type", "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Requested-With", "X-Access-Key"};
+    std::vector<std::string> cors_exposed_headers = cfg.cors_cfg.has_value() ? cfg.cors_cfg->exposed_headers : std::vector<std::string>{"ETag", "X-File-Size", "X-Upload-Id"};
+    bool cors_allow_credentials = cfg.cors_cfg.has_value() ? cfg.cors_cfg->allow_credentials : false;
+    int cors_max_age = cfg.cors_cfg.has_value() ? cfg.cors_cfg->max_age : 86400;
 
-    upload_limits_config default_limits;
-    default_limits.max_file_size = 5ULL * 1024 * 1024 * 1024; // 5 GB
-    default_limits.max_part_size = 100 * 1024 * 1024; // 100 MB
-    default_limits.max_parts_per_upload = 10000; // как в S3
-    default_limits.max_temp_storage_total = 20ULL * 1024 * 1024 * 1024; // 20 GB
+    upload_limits_config default_limits = cfg.upload_limits;
 
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        
+        // Skip config file argument (already processed)
+        if (arg == "--config" || arg == "-c") {
+            // Skip the next argument as it's the config file path
+            if (i + 1 < argc && argv[i+1][0] != '-') {
+                i++; // skip the path
+            }
+            continue;
+        }
         
         if (arg == "--address" || arg == "-a") {
             if (i + 1 < argc) address = argv[++i];
@@ -405,6 +437,7 @@ int main(int argc, char* argv[])
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
+                      << "  -c, --config <file>    Load configuration from JSON file\n"
                       << "  -a, --address <addr>   Bind address (default: 0.0.0.0)\n"
                       << "  -p, --port <port>      Port number (default: 9000)\n"
                       << "  -s, --storage <path>   Storage directory (default: ./storage)\n"
@@ -509,7 +542,7 @@ int main(int argc, char* argv[])
             };
         }
         
-        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg, cors_cfg);
+        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg, cors_cfg, cfg.upload_limits, cfg.keep_alive, cfg.rate_limiter);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;

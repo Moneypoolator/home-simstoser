@@ -16,7 +16,8 @@ s3_server::s3_server(const std::string& address,
     std::optional<ssl_config> ssl_cfg,
     std::optional<cors_config> cors_cfg,
     upload_limits_config upload_limits,
-    keep_alive_config keep_alive)
+    keep_alive_config keep_alive,
+    rate_limiter_config rate_limiter)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
@@ -27,6 +28,7 @@ s3_server::s3_server(const std::string& address,
     , _cors_config(std::move(cors_cfg))
     , _upload_limits(std::move(upload_limits))
     , _keep_alive_config(std::move(keep_alive))
+    , _rate_limiter_config(std::move(rate_limiter))
 {
     _ssl_enabled = _ssl_config.has_value();
     
@@ -64,9 +66,9 @@ s3_server::s3_server(const std::string& address,
     
     LOG(INFO) << "Storage path: " << storage_path;
     
-    // Initialize rate limiter with default configuration
-    _rate_limiter = std::make_unique<rate_limiter>();
-    LOG(INFO) << "Rate limiting enabled with default configuration";
+    // Initialize rate limiter with configuration
+    _rate_limiter = std::make_unique<::rate_limiter>(_rate_limiter_config);
+    LOG(INFO) << "Rate limiting enabled with configuration";
     
     // Log CORS configuration
     if (_cors_config.has_value()) {

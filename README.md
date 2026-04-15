@@ -181,6 +181,7 @@ This starts the server with default settings:
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
+| `--config` | `-c` | Load configuration from JSON file | (none) |
 | `--address` | `-a` | IP address to bind to | `0.0.0.0` |
 | `--port` | `-p` | Server port | `9000` |
 | `--storage` | `-s` | Directory for file storage | `./storage` |
@@ -201,6 +202,32 @@ This starts the server with default settings:
 | `--cors-credentials` | | Allow credentials (true/false) | `false` |
 | `--cors-max-age` | | Preflight cache duration in seconds | `86400` |
 | `--help` | `-h` | Show help message | - |
+
+#### Configuration File
+
+For complex deployments, you can use a JSON configuration file to set all server options. The configuration file supports all command-line options and additional fine‑grained settings (rate limiting, keep‑alive, upload limits, CORS, etc.).
+
+**Usage:**
+
+```bash
+./s3_server --config /path/to/config.json
+```
+
+Command‑line arguments override values from the configuration file.
+
+**File format:** See [`config.example.json`](config.example.json) for a complete example with all available fields and their default values.
+
+The configuration file includes the following sections:
+
+- **Server basics** (`address`, `port`, `storage_path`, `keys_file`, `users_file`, `enable_auth`, `enable_ssl`, `use_letsencrypt`)
+- **SSL configuration** (`ssl`) – certificate paths and client verification
+- **CORS configuration** (`cors`) – allowed origins, methods, headers, etc.
+- **Upload limits** (`upload_limits`) – maximum file size, part size, etc.
+- **Keep‑alive settings** (`keep_alive`) – connection reuse parameters
+- **Rate limiting** (`rate_limiter`) – request/connection limits and DDoS protection
+- **Logging** (`logging`) – log level and directory
+
+All fields are optional; missing fields use the built‑in defaults.
 
 #### Example Usage
 

@@ -117,7 +117,8 @@ public:
               std::optional<ssl_config> ssl_cfg = std::nullopt,
               std::optional<cors_config> cors_cfg = std::nullopt,
               upload_limits_config upload_limits = upload_limits_config(),
-              keep_alive_config keep_alive = keep_alive_config());
+              keep_alive_config keep_alive = keep_alive_config(),
+              rate_limiter_config rate_limiter = rate_limiter_config());
     
     ~s3_server();
     
@@ -153,6 +154,7 @@ private:
 
     upload_limits_config _upload_limits;
     keep_alive_config _keep_alive_config;
+    rate_limiter_config _rate_limiter_config;
     
     void do_accept();
     void handle_session(tcp::socket socket, const std::string& client_ip = "");
