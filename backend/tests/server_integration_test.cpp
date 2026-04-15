@@ -277,8 +277,11 @@ TEST_F(ServerIntegrationTest, UploadAndDownloadFile) {
 TEST_F(ServerIntegrationTest, ListFiles) {
     // Arrange - загружаем несколько файлов
     _client->put("/file1.txt", "Content 1");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
     _client->put("/file2.txt", "Content 2");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
     _client->put("/subdir/file3.txt", "Content 3");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
     
     // Act
     auto response = _client->get("/list");

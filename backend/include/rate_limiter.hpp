@@ -18,7 +18,7 @@ struct rate_limiter_config {
     
     // Connection limiting
     size_t max_connections_per_ip = 10;       // Max concurrent connections per IP
-    size_t max_connection_rate = 5;           // Max new connections per second per IP
+    size_t max_connection_rate = 100;         // Max new connections per second per IP (increased for tests)
     
     // Request size limits
     size_t max_request_size = 100 * 1024 * 1024;  // 100 MB

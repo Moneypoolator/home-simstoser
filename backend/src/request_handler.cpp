@@ -1026,9 +1026,10 @@ http::response<http::string_body> request_handler::create_response(
     res.set(http::field::content_type, content_type);
     res.set(http::field::access_control_allow_origin, "*");
     res.body() = body;
+    res.prepare_payload();
     
-    VLOG(2) << "Creating response: status=" << static_cast<int>(status) 
-            << ", content_type=" << content_type 
+    VLOG(2) << "Creating response: status=" << static_cast<int>(status)
+            << ", content_type=" << content_type
             << ", body_size=" << body.size();
     
     return res;
