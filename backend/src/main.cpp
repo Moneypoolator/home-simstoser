@@ -44,100 +44,116 @@ void generate_self_signed_cert(const std::string& cert_file, const std::string& 
     X509_NAME* name = nullptr;
     FILE* fp = nullptr;
     bool success = false;
-    
+
+    bool certificate_generated_successfully = false;
+    bool private_key_generated_successfully = false;
+
     // 1. Генерируем RSA ключ
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
-    if (!ctx) {
+    if (ctx) {
+
+        if (EVP_PKEY_keygen_init(ctx) <= 0) {
+            LOG(WARNING) << "Failed to initialize key generation";
+            // goto cleanup;
+        } else {
+
+            if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 4096) <= 0) {
+                LOG(WARNING) << "Failed to set RSA key length";
+                // goto cleanup;
+            } else {
+
+                if (EVP_PKEY_keygen(ctx, &pkey) <= 0) {
+                    LOG(WARNING) << "Failed to generate RSA key";
+                    // goto cleanup;
+                }
+
+                EVP_PKEY_CTX_free(ctx);
+                ctx = nullptr;
+
+                // 2. Создаем X509 сертификат
+                x509 = X509_new();
+                if (!x509) {
+                    LOG(WARNING) << "Failed to create X509 certificate";
+                    // goto cleanup;
+                } else {
+
+                    // Устанавливаем версию
+                    X509_set_version(x509, 2); // X509v3
+
+                    // Серийный номер
+                    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
+
+                    // Валидность: 365 дней
+                    X509_gmtime_adj(X509_get_notBefore(x509), 0);
+                    X509_gmtime_adj(X509_get_notAfter(x509), 365 * 24 * 60 * 60);
+
+                    // Устанавливаем публичный ключ
+                    X509_set_pubkey(x509, pkey);
+
+                    // Устанавливаем subject и issuer (самоподписанный)
+                    name = X509_get_subject_name(x509);
+                    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                        (const unsigned char*)"localhost", -1, -1, 0);
+                    X509_set_issuer_name(x509, name);
+
+                    // Подписываем сертификат
+                    if (X509_sign(x509, pkey, EVP_sha256()) <= 0) {
+                        LOG(WARNING) << "Failed to sign certificate";
+                        // goto cleanup;
+                    } else {
+
+                        // 3. Записываем приватный ключ в файл
+                        fp = fopen(key_file.c_str(), "wb");
+                        if (fp) {
+
+                            if (!PEM_write_PrivateKey(fp, pkey, nullptr, nullptr, 0, nullptr, nullptr)) {
+                                LOG(WARNING) << "Failed to write private key";
+                            } else {
+                                certificate_generated_successfully = true;
+                            }
+
+                            fclose(fp);
+                            fp = nullptr;
+
+                        } else {
+                            LOG(WARNING) << "Failed to open key file for writing: " << key_file;
+                        }
+
+                        // 4. Записываем сертификат в файл
+                        fp = fopen(cert_file.c_str(), "wb");
+                        if (fp) {
+
+                            if (!PEM_write_X509(fp, x509)) {
+                                LOG(WARNING) << "Failed to write certificate";
+                            } else {
+                                private_key_generated_successfully = true;
+                            }
+
+                            fclose(fp);
+                            fp = nullptr;
+
+                        } else {
+                            LOG(WARNING) << "Failed to open certificate file for writing: " << cert_file;
+                        }
+                    }
+                }
+            }
+        }
+
+    } else {
         LOG(WARNING) << "Failed to create EVP_PKEY_CTX";
-        goto cleanup;
+        // goto cleanup;
     }
-    
-    if (EVP_PKEY_keygen_init(ctx) <= 0) {
-        LOG(WARNING) << "Failed to initialize key generation";
-        goto cleanup;
+
+    if (certificate_generated_successfully && private_key_generated_successfully) {
+
+        success = true;
+        LOG(INFO) << "Self-signed certificate generated successfully";
+        LOG(INFO) << "Certificate: " << cert_file;
+        LOG(INFO) << "Private key: " << key_file;
     }
-    
-    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 4096) <= 0) {
-        LOG(WARNING) << "Failed to set RSA key length";
-        goto cleanup;
-    }
-    
-    if (EVP_PKEY_keygen(ctx, &pkey) <= 0) {
-        LOG(WARNING) << "Failed to generate RSA key";
-        goto cleanup;
-    }
-    
-    EVP_PKEY_CTX_free(ctx);
-    ctx = nullptr;
-    
-    // 2. Создаем X509 сертификат
-    x509 = X509_new();
-    if (!x509) {
-        LOG(WARNING) << "Failed to create X509 certificate";
-        goto cleanup;
-    }
-    
-    // Устанавливаем версию
-    X509_set_version(x509, 2); // X509v3
-    
-    // Серийный номер
-    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
-    
-    // Валидность: 365 дней
-    X509_gmtime_adj(X509_get_notBefore(x509), 0);
-    X509_gmtime_adj(X509_get_notAfter(x509), 365 * 24 * 60 * 60);
-    
-    // Устанавливаем публичный ключ
-    X509_set_pubkey(x509, pkey);
-    
-    // Устанавливаем subject и issuer (самоподписанный)
-    name = X509_get_subject_name(x509);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-                               (const unsigned char*)"localhost", -1, -1, 0);
-    X509_set_issuer_name(x509, name);
-    
-    // Подписываем сертификат
-    if (X509_sign(x509, pkey, EVP_sha256()) <= 0) {
-        LOG(WARNING) << "Failed to sign certificate";
-        goto cleanup;
-    }
-    
-    // 3. Записываем приватный ключ в файл
-    fp = fopen(key_file.c_str(), "wb");
-    if (!fp) {
-        LOG(WARNING) << "Failed to open key file for writing: " << key_file;
-        goto cleanup;
-    }
-    
-    if (!PEM_write_PrivateKey(fp, pkey, nullptr, nullptr, 0, nullptr, nullptr)) {
-        LOG(WARNING) << "Failed to write private key";
-        fclose(fp);
-        goto cleanup;
-    }
-    fclose(fp);
-    fp = nullptr;
-    
-    // 4. Записываем сертификат в файл
-    fp = fopen(cert_file.c_str(), "wb");
-    if (!fp) {
-        LOG(WARNING) << "Failed to open certificate file for writing: " << cert_file;
-        goto cleanup;
-    }
-    
-    if (!PEM_write_X509(fp, x509)) {
-        LOG(WARNING) << "Failed to write certificate";
-        fclose(fp);
-        goto cleanup;
-    }
-    fclose(fp);
-    fp = nullptr;
-    
-    success = true;
-    LOG(INFO) << "Self-signed certificate generated successfully";
-    LOG(INFO) << "Certificate: " << cert_file;
-    LOG(INFO) << "Private key: " << key_file;
-    
-cleanup:
+
+// cleanup:
     if (ctx) EVP_PKEY_CTX_free(ctx);
     if (pkey) EVP_PKEY_free(pkey);
     if (x509) X509_free(x509);
