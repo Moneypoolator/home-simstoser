@@ -359,6 +359,31 @@ TEST_F(AuthorizerTest, IsResourceOwner) {
     EXPECT_FALSE(auth->is_resource_owner("other", "/owned"));
 }
 
+TEST_F(AuthorizerTest, CheckAccessByPolicy) {
+    auto user = auth->create_user("user", "user@example.com", user_role::VIEWER);
+    ASSERT_TRUE(user.has_value());
+
+    // Create a policy that allows READ on /public/*
+    std::vector<permission> perms = {
+        {permission_type::READ, "/public/*", true},
+        {permission_type::WRITE, "/public/*", false} // explicit deny
+    };
+    auto policy = auth->create_policy("TestPolicy", "Test policy", perms);
+    ASSERT_TRUE(policy.has_value());
+
+    // User should have READ access to matching path
+    bool can_read = auth->check_access(user->user_id, "/public/file.txt", permission_type::READ);
+    EXPECT_TRUE(can_read);
+
+    // User should NOT have WRITE access due to explicit deny
+    bool can_write = auth->check_access(user->user_id, "/public/file.txt", permission_type::WRITE);
+    EXPECT_FALSE(can_write);
+
+    // Non-matching path and permission not granted by role should be denied
+    bool other_manage = auth->check_access(user->user_id, "/private/file.txt", permission_type::MANAGE_ACL);
+    EXPECT_FALSE(other_manage);
+}
+
 // ========== Static Utility Tests ==========
 
 TEST(AuthorizerStaticTest, ParsePermission) {

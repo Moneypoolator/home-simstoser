@@ -763,7 +763,36 @@ bool authorizer::check_policy_permissions(
     const std::string& resource_path,
     permission_type required_permission) const
 {
-    // TODO: Реализация проверки политик
-    // Пока возвращаем false, чтобы не давать доступ по умолчанию
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    (void)user_id; // Currently unused, reserved for future user-specific policies
+    
+    bool found_allow = false;
+    bool found_deny = false;
+    
+    for (const auto& [policy_id, policy] : _policies) {
+        for (const auto& perm : policy.permissions) {
+            if (perm.type == required_permission &&
+                matches_pattern(resource_path, perm.resource_pattern)) {
+                if (perm.allow) {
+                    found_allow = true;
+                } else {
+                    found_deny = true;
+                }
+            }
+        }
+    }
+    
+    // Explicit deny overrides any allow
+    if (found_deny) {
+        VLOG(2) << "Access denied by policy (explicit deny)";
+        return false;
+    }
+    
+    if (found_allow) {
+        VLOG(2) << "Access granted by policy";
+        return true;
+    }
+    
+    // No matching policy
     return false;
 }
