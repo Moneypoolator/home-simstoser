@@ -460,7 +460,7 @@ aws s3 cp local-file.txt s3://my-file.txt
 - **File Size Validation**: No built-in file size limits or quota management
 - **Temporary Files**: Multipart and stream uploads create temporary files that are cleaned up on completion/abort, but orphaned files may accumulate on unexpected crashes
 - **Memory Usage**: Large file uploads buffer data in memory; streaming improvements needed for very large files
-- **Concurrency Limits**: No built-in rate limiting or connection throttling
+- [X] **Concurrency Limits**: Rate limiting and connection throttling are implemented with periodic cleanup of stale IP entries (every 5 minutes). Configuration is static per server start.
 - **User Management**: Basic RBAC is implemented but lacks advanced features like groups, permission inheritance, and fine-grained resource controls
 
 ### Contributing

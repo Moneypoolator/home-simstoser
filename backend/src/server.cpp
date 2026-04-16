@@ -23,7 +23,9 @@ s3_server::s3_server(const std::string& address,
     , _storage_path(storage_path)
     , _keys_file(keys_file)
     , _users_file(users_file)
+    , _io_context()
     , _acceptor(_io_context)
+    , _cleanup_timer(_io_context)
     , _ssl_config(std::move(ssl_cfg))
     , _cors_config(std::move(cors_cfg))
     , _upload_limits(std::move(upload_limits))
@@ -98,6 +100,30 @@ s3_server::~s3_server()
     stop();
 }
 
+void s3_server::start_cleanup_timer()
+{
+    if (!_rate_limiter) {
+        return;
+    }
+    
+    _cleanup_timer.expires_after(CLEANUP_INTERVAL);
+    _cleanup_timer.async_wait([this](const boost::system::error_code& ec) {
+        if (ec) {
+            if (ec != boost::asio::error::operation_aborted) {
+                LOG(ERROR) << "Cleanup timer error: " << ec.message();
+            }
+            return;
+        }
+        
+        // Perform cleanup
+        VLOG(2) << "Running rate limiter cleanup";
+        _rate_limiter->cleanup();
+        
+        // Schedule next cleanup
+        start_cleanup_timer();
+    });
+}
+
 void s3_server::run(std::size_t threads)
 {
     if (threads == 0) {
@@ -121,6 +147,9 @@ void s3_server::run(std::size_t threads)
         
         // Запускаем первую асинхронную операцию принятия соединения
         do_accept();
+        
+        // Start periodic cleanup timer for rate limiter
+        start_cleanup_timer();
         
         // Запускаем пул потоков
         _threads.reserve(threads);
@@ -147,6 +176,7 @@ void s3_server::stop()
     
     _running = false;
     _acceptor.close();
+    _cleanup_timer.cancel();
     
     // Wait for active sessions to finish (graceful shutdown)
     constexpr int shutdown_timeout_seconds = 30;

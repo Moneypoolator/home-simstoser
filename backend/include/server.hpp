@@ -136,6 +136,7 @@ private:
     std::string _users_file;
     asio::io_context _io_context;
     tcp::acceptor _acceptor;
+    asio::steady_timer _cleanup_timer;
     std::vector<std::thread> _threads;
     std::atomic<bool> _running{true};
     std::atomic<int> _active_sessions{0};
@@ -155,6 +156,10 @@ private:
     upload_limits_config _upload_limits;
     keep_alive_config _keep_alive_config;
     rate_limiter_config _rate_limiter_config;
+    
+    // Rate limiter cleanup timer
+    static constexpr std::chrono::minutes CLEANUP_INTERVAL{5};
+    void start_cleanup_timer();
     
     void do_accept();
     void handle_session(tcp::socket socket, const std::string& client_ip = "");
