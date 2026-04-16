@@ -38,6 +38,7 @@ struct user {
     bool is_active = true;
     std::chrono::system_clock::time_point created_at;
     std::chrono::system_clock::time_point last_login;
+    std::vector<std::string> groups; // Группы, в которых состоит пользователь
 };
 
 // Структура разрешения
@@ -95,6 +96,23 @@ public:
     
     // Список всех пользователей
     std::vector<user> list_users() const;
+    
+    // === Управление группами ===
+    
+    // Добавить пользователя в группу
+    bool add_user_to_group(const std::string& user_id, const std::string& group_name);
+    
+    // Удалить пользователя из группы
+    bool remove_user_from_group(const std::string& user_id, const std::string& group_name);
+    
+    // Получить список групп пользователя
+    std::vector<std::string> get_user_groups(const std::string& user_id) const;
+    
+    // Получить список всех групп
+    std::vector<std::string> list_groups() const;
+    
+    // Получить список участников группы
+    std::vector<std::string> get_group_members(const std::string& group_name) const;
     
     // === Управление политиками доступа ===
     
@@ -155,6 +173,13 @@ public:
         permission_type perm
     );
     
+    // Удалить право доступа для группы
+    bool remove_group_permission(
+        const std::string& resource_path,
+        const std::string& group_name,
+        permission_type perm
+    );
+    
     // === Проверка доступа ===
     
     // Проверить, имеет ли пользователь доступ к ресурсу
@@ -207,6 +232,7 @@ private:
     std::map<std::string, user> _users;
     std::map<std::string, access_policy> _policies;
     std::map<std::string, resource_acl> _resource_acls;
+    std::map<std::string, std::set<std::string>> _group_members; // group_name -> set of user_ids
     
     // Генерация уникального ID
     std::string generate_id() const;

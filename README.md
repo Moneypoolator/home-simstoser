@@ -457,9 +457,9 @@ aws s3 cp local-file.txt s3://my-file.txt
 - **Authentication**: AWS Signature Version 4 is implemented but requires proper key management
 - **HTTPS/SSL**: SSL/TLS support with automatic self-signed certificate generation and Let's Encrypt integration
 - **Error Handling**: Basic error handling is implemented; some edge cases may need improvement
-- **File Size Validation**: No built-in file size limits or quota management
+- **File Size Validation**: Configurable file size limits and quotas via upload limits configuration (max_file_size, max_part_size, max_parts_per_upload, max_temp_storage_total)
 - **Temporary Files**: Multipart and stream uploads create temporary files that are cleaned up on completion/abort, but orphaned files may accumulate on unexpected crashes
-- **Memory Usage**: Large file uploads buffer data in memory; streaming improvements needed for very large files
+- **Memory Usage**: Large file uploads buffer data in memory for certain operations; streaming methods (`download_file_stream`, `upload_file_stream`) are available for improved memory efficiency
 - [X] **Concurrency Limits**: Rate limiting and connection throttling are implemented with periodic cleanup of stale IP entries (every 5 minutes). Configuration is static per server start.
 - **User Management**: Basic RBAC is implemented but lacks advanced features like groups, permission inheritance, and fine-grained resource controls
 

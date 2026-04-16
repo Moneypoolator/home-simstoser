@@ -56,6 +56,7 @@ bool authorizer::load_users(const std::string& filepath) {
         }
         
         _users.clear();
+        _group_members.clear();
         for (const auto& item : data) {
             user u;
             
@@ -106,6 +107,16 @@ bool authorizer::load_users(const std::string& filepath) {
                 if (tp) u.last_login = *tp;
             }
             
+            // groups (опционально)
+            if (item.contains("groups") && item["groups"].is_array()) {
+                for (const auto& group_item : item["groups"]) {
+                    if (group_item.is_string()) {
+                        u.groups.push_back(group_item);
+                        _group_members[group_item].insert(u.user_id);
+                    }
+                }
+            }
+            
             _users[u.user_id] = u;
             LOG(INFO) << "Loaded user: " << u.username 
                       << " (ID: " << u.user_id 
@@ -133,6 +144,7 @@ bool authorizer::save_users(const std::string& filepath) const {
         item["is_active"] = u.is_active;
         item["created_at"] = timepoint_to_iso8601(u.created_at);
         item["last_login"] = timepoint_to_iso8601(u.last_login);
+        item["groups"] = u.groups;
         data.push_back(item);
     }
     
@@ -273,6 +285,96 @@ std::vector<user> authorizer::list_users() const {
     }
     
     return users;
+}
+
+// ========== Управление группами ==========
+
+bool authorizer::add_user_to_group(const std::string& user_id, const std::string& group_name) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    auto user_it = _users.find(user_id);
+    if (user_it == _users.end()) {
+        LOG(WARNING) << "Cannot add user to group: user not found - " << user_id;
+        return false;
+    }
+    
+    // Add group to user's groups list if not already present
+    auto& groups = user_it->second.groups;
+    if (std::find(groups.begin(), groups.end(), group_name) == groups.end()) {
+        groups.push_back(group_name);
+    }
+    
+    // Add user to group members map
+    _group_members[group_name].insert(user_id);
+    
+    LOG(INFO) << "Added user " << user_it->second.username << " to group " << group_name;
+    return true;
+}
+
+bool authorizer::remove_user_from_group(const std::string& user_id, const std::string& group_name) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    auto user_it = _users.find(user_id);
+    if (user_it == _users.end()) {
+        return false;
+    }
+    
+    // Remove group from user's groups list
+    auto& groups = user_it->second.groups;
+    auto it = std::find(groups.begin(), groups.end(), group_name);
+    if (it != groups.end()) {
+        groups.erase(it);
+    }
+    
+    // Remove user from group members map
+    auto group_it = _group_members.find(group_name);
+    if (group_it != _group_members.end()) {
+        group_it->second.erase(user_id);
+        if (group_it->second.empty()) {
+            _group_members.erase(group_it);
+        }
+    }
+    
+    LOG(INFO) << "Removed user " << user_it->second.username << " from group " << group_name;
+    return true;
+}
+
+std::vector<std::string> authorizer::get_user_groups(const std::string& user_id) const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    auto user_it = _users.find(user_id);
+    if (user_it == _users.end()) {
+        return {};
+    }
+    
+    return user_it->second.groups;
+}
+
+std::vector<std::string> authorizer::list_groups() const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    std::vector<std::string> groups;
+    groups.reserve(_group_members.size());
+    for (const auto& [group_name, members] : _group_members) {
+        groups.push_back(group_name);
+    }
+    return groups;
+}
+
+std::vector<std::string> authorizer::get_group_members(const std::string& group_name) const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    auto it = _group_members.find(group_name);
+    if (it == _group_members.end()) {
+        return {};
+    }
+    
+    std::vector<std::string> members;
+    members.reserve(it->second.size());
+    for (const auto& user_id : it->second) {
+        members.push_back(user_id);
+    }
+    return members;
 }
 
 // ========== Управление политиками доступа ==========
@@ -509,6 +611,39 @@ bool authorizer::add_group_permission(
     return true;
 }
 
+bool authorizer::remove_group_permission(
+    const std::string& resource_path,
+    const std::string& group_name,
+    permission_type perm)
+{
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    auto acl_it = _resource_acls.find(resource_path);
+    if (acl_it == _resource_acls.end()) {
+        return false;
+    }
+    
+    auto group_it = acl_it->second.group_permissions.find(group_name);
+    if (group_it == acl_it->second.group_permissions.end()) {
+        return false;
+    }
+    
+    size_t erased = group_it->second.erase(perm);
+    if (erased == 0) {
+        return false;
+    }
+    
+    if (group_it->second.empty()) {
+        acl_it->second.group_permissions.erase(group_it);
+    }
+    
+    LOG(INFO) << "Removed permission for group " << group_name
+              << " on resource " << resource_path
+              << ": " << permission_to_string(perm);
+    
+    return true;
+}
+
 // ========== Проверка доступа ==========
 
 bool authorizer::check_access(
@@ -561,7 +696,17 @@ bool authorizer::check_access(
             }
         }
         
-        // TODO: Проверка групповых прав
+        // Проверка групповых прав
+        for (const std::string& group_name : current_user.groups) {
+            auto group_perms_it = acl.group_permissions.find(group_name);
+            if (group_perms_it != acl.group_permissions.end()) {
+                if (group_perms_it->second.count(required_permission) > 0) {
+                    VLOG(2) << "Access granted by ACL for group " << group_name
+                            << " for user: " << current_user.username;
+                    return true;
+                }
+            }
+        }
         
         // Если есть явный запрет
         // (реализация явных запретов может быть добавлена позже)

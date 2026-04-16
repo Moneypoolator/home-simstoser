@@ -1,15 +1,25 @@
-# Установка зависимостей (Ubuntu/Debian)
-# sudo apt-get install libboost-all-dev libssl-dev nlohmann-json3-dev
+#!/bin/bash
+# Build and run script for Home S3 Storage
+# Fixes for actual project structure
 
-cd web && npm run build
+set -e  # Exit on error
+
+# Change to script directory (project root)
+cd "$(dirname "$0")"
+
+echo "Building frontend..."
+cd web
+if [ ! -d "node_modules" ]; then
+    echo "Installing npm dependencies..."
+    npm install
+fi
+npm run build
 cd ..
 
-# Сборка
-mkdir build && cd build
-cmake ..
+echo "Building backend..."
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 
-cp -r ../web/dist/* ./web/dist/
-
-# Запуск
+echo "Starting server..."
 ./s3_server --port 9000 --storage ./storage --no-auth

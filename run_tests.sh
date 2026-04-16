@@ -1,15 +1,23 @@
-# Сборка
-mkdir build && cd build
-cmake .. 
-#-DGTEST_ROOT=/path/to/googletest
-make
+#!/bin/bash
+# Test runner script for Home S3 Storage
+# Fixes for actual project structure
 
-# Запуск всех тестов
+set -e  # Exit on error
 
-# Или запуск конкретных тестов
-./tests/unit_tests
-./tests/integration_tests
+# Change to script directory (project root)
+cd "$(dirname "$0")"
 
-# Запуск с подробным выводом
-./tests/unit_tests --gtest_output=xml:unit_tests.xml
-./tests/integration_tests --gtest_filter="ServerIntegrationTest.*"
+echo "Building tests..."
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+
+echo "Running unit tests..."
+./backend/tests/unit_tests
+
+echo "Running integration tests..."
+./backend/tests/integration_tests
+
+# Optional: detailed output
+# ./backend/tests/unit_tests --gtest_output=xml:unit_tests.xml
+# ./backend/tests/integration_tests --gtest_filter="ServerIntegrationTest.*"
