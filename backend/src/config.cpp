@@ -143,6 +143,16 @@ void from_json(const nlohmann::json& j, s3_server::ssl_config& cfg) {
     } else {
         cfg.dh_file = std::nullopt;
     }
+    if (j.contains("ca_file") && !j.at("ca_file").is_null()) {
+        cfg.ca_file = j.at("ca_file").get<std::string>();
+    } else {
+        cfg.ca_file = std::nullopt;
+    }
+    if (j.contains("ca_path") && !j.at("ca_path").is_null()) {
+        cfg.ca_path = j.at("ca_path").get<std::string>();
+    } else {
+        cfg.ca_path = std::nullopt;
+    }
     if (j.contains("verify_client")) j.at("verify_client").get_to(cfg.verify_client);
 }
 
@@ -153,6 +163,16 @@ void to_json(nlohmann::json& j, const s3_server::ssl_config& cfg) {
         j["dh_file"] = cfg.dh_file.value();
     } else {
         j["dh_file"] = nullptr;
+    }
+    if (cfg.ca_file.has_value()) {
+        j["ca_file"] = cfg.ca_file.value();
+    } else {
+        j["ca_file"] = nullptr;
+    }
+    if (cfg.ca_path.has_value()) {
+        j["ca_path"] = cfg.ca_path.value();
+    } else {
+        j["ca_path"] = nullptr;
     }
     j["verify_client"] = cfg.verify_client;
 }

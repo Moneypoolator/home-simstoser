@@ -480,6 +480,22 @@ int main(int argc, char* argv[])
         std::optional<s3_server::ssl_config> ssl_cfg;
         
         if (use_ssl) {
+            // Start with configuration from file if present
+            if (cfg.ssl_cfg.has_value()) {
+                ssl_cfg = cfg.ssl_cfg;
+            } else {
+                // Create default SSL configuration
+                ssl_cfg = s3_server::ssl_config{
+                    .cert_file = cert_file,
+                    .private_key = key_file,
+                    .dh_file = std::nullopt,
+                    .ca_file = std::nullopt,
+                    .ca_path = std::nullopt,
+                    .verify_client = false
+                };
+            }
+            
+            // Override certificate paths if Let's Encrypt is used
             if (use_letsencrypt) {
                 // Use Let's Encrypt certificate paths
                 if (letsencrypt_dir.empty()) {
@@ -514,6 +530,10 @@ int main(int argc, char* argv[])
                 renew_certificate_if_needed(cert_file, key_file, 30);
             }
             
+            // Update certificate and key paths in the configuration (they may have been overridden by command line)
+            ssl_cfg->cert_file = cert_file;
+            ssl_cfg->private_key = key_file;
+            
             // Проверяем существование файлов сертификата
             if (!fs::exists(cert_file) || !fs::exists(key_file)) {
                 LOG(FATAL) << "SSL certificate or key file not found!";
@@ -521,13 +541,6 @@ int main(int argc, char* argv[])
                 logging::shutdown();
                 return 1;
             }
-            
-            ssl_cfg = s3_server::ssl_config{
-                .cert_file = cert_file,
-                .private_key = key_file,
-                .dh_file = std::nullopt,
-                .verify_client = false
-            };
         }
         
         // Create CORS configuration if enabled

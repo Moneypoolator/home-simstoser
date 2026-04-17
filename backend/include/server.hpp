@@ -41,6 +41,8 @@ public:
         std::string cert_file;
         std::string private_key;
         std::optional<std::string> dh_file;
+        std::optional<std::string> ca_file;
+        std::optional<std::string> ca_path;
         bool verify_client = false;
     };
 

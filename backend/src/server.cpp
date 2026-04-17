@@ -333,6 +333,24 @@ std::shared_ptr<ssl::context> s3_server::setup_ssl_context()
         // Настройка проверки клиента (если требуется)
         if (_ssl_config->verify_client) {
             ctx->set_verify_mode(ssl::verify_peer | ssl::verify_fail_if_no_peer_cert);
+            
+            // Загружаем CA сертификаты для проверки клиентских сертификатов
+            bool ca_loaded = false;
+            if (_ssl_config->ca_file) {
+                ctx->load_verify_file(*_ssl_config->ca_file);
+                ca_loaded = true;
+                LOG(INFO) << "Loaded CA certificates from file: " << *_ssl_config->ca_file;
+            }
+            if (_ssl_config->ca_path) {
+                ctx->add_verify_path(*_ssl_config->ca_path);
+                ca_loaded = true;
+                LOG(INFO) << "Added CA certificates path: " << *_ssl_config->ca_path;
+            }
+            if (!ca_loaded) {
+                // Используем системные CA сертификаты по умолчанию
+                ctx->set_default_verify_paths();
+                LOG(INFO) << "Using system default CA certificates for client verification";
+            }
         } else {
             ctx->set_verify_mode(ssl::verify_none);
         }
