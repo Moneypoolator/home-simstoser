@@ -9,6 +9,7 @@
 #include <mutex>
 #include <chrono>
 #include <deque>
+#include <functional>
 
 namespace fs = std::filesystem;
 
@@ -149,8 +150,8 @@ private:
     std::string generate_upload_id() const;
     
     // Получение метаданных загрузки
-    std::optional<multipart_upload*> get_upload(const std::string& upload_id);
-    std::optional<const multipart_upload*> get_upload(const std::string& upload_id) const;
+    std::optional<std::reference_wrapper<multipart_upload>> get_upload(const std::string& upload_id);
+    std::optional<std::reference_wrapper<const multipart_upload>> get_upload(const std::string& upload_id) const;
     
     // Объединение частей в один файл
     bool merge_parts(const multipart_upload& upload, const std::vector<int>& part_numbers);
@@ -161,8 +162,8 @@ private:
     // ========== СТРИМИНГОВАЯ ЗАГРУЗКА (приватные методы) ==========
     
     // Получение стриминговой загрузки
-    std::optional<stream_upload*> get_stream_upload(const std::string& stream_id);
-    std::optional<const stream_upload*> get_stream_upload(const std::string& stream_id) const;
+    std::optional<std::reference_wrapper<stream_upload>> get_stream_upload(const std::string& stream_id);
+    std::optional<std::reference_wrapper<const stream_upload>> get_stream_upload(const std::string& stream_id) const;
     
     // Очистка стриминговой загрузки
     void cleanup_stream_upload(const std::string& stream_id);

@@ -412,7 +412,7 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
             
             beast::flat_buffer buffer;
             http::request_parser<http::string_body> parser;
-            parser.body_limit(100 * 1024 * 1024);
+            parser.body_limit(_rate_limiter_config.max_request_size);
             
             http::read(socket, buffer, parser, ec);
             if (ec) {
@@ -615,7 +615,7 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
             
             beast::flat_buffer buffer;
             http::request_parser<http::string_body> parser;
-            parser.body_limit(100 * 1024 * 1024);
+            parser.body_limit(_rate_limiter_config.max_request_size);
             
             http::read(socket, buffer, parser, ec);
             if (ec) {

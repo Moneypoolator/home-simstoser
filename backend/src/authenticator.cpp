@@ -477,12 +477,9 @@ std::string authenticator::generate_signature(
                                + credential_scope + "\n"
                                + sha256_hex(canonical_request);
     
-    // DEBUG: Log canonical request and string to sign when environment variable is set
-    const char* debug_env = std::getenv("DEBUG_AUTH");
-    if (debug_env && std::string(debug_env) == "1") {
-        LOG(INFO) << "Canonical request:\n" << canonical_request;
-        LOG(INFO) << "String to sign:\n" << string_to_sign;
-    }
+    // DEBUG: Log canonical request and string to sign when verbosity >= 3
+    VLOG(3) << "Canonical request:\n" << canonical_request;
+    VLOG(3) << "String to sign:\n" << string_to_sign;
     
     // 6. Compute signing key
     std::string signing_key = get_signature_key(secret_key, date_stamp, region, service);

@@ -1,5 +1,6 @@
 /.cache
 /build
+/build_test
 /web/node_modules
 /web/dist
 /rest-api/keys-generation/__pycache__

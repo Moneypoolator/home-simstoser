@@ -243,12 +243,12 @@ bool file_manager::upload_part(
     std::lock_guard<std::mutex> lock(_mutex);
     
     auto upload_opt = get_upload(upload_id);
-    if (!upload_opt || (*upload_opt)->completed) {
+    if (!upload_opt || upload_opt->get().completed) {
         LOG(WARNING) << "Upload not found or already completed: " << upload_id;
         return false;
     }
     
-    multipart_upload* upload = *upload_opt;
+    multipart_upload& upload = upload_opt->get();
 
     // Проверка размера части
     if (data.size() > _limits.max_part_size) {
@@ -257,9 +257,9 @@ bool file_manager::upload_part(
     }
 
     // Проверка количества частей
-    if (upload->parts.size() >= _limits.max_parts_per_upload) {
+    if (upload.parts.size() >= _limits.max_parts_per_upload) {
         LOG(ERROR) << "Too many parts for upload " << upload_id
-                   << ": " << upload->parts.size() << " >= " << _limits.max_parts_per_upload;
+                   << ": " << upload.parts.size() << " >= " << _limits.max_parts_per_upload;
         return false;
     }
 
@@ -277,7 +277,7 @@ bool file_manager::upload_part(
     std::string part_filename = part_name.str();
     
     // Путь к файлу части
-    fs::path part_path = upload->temp_dir / part_filename;
+    fs::path part_path = upload.temp_dir / part_filename;
     
     // Сохраняем часть
     std::ofstream part_file(part_path, std::ios::binary | std::ios::trunc);
@@ -295,8 +295,8 @@ bool file_manager::upload_part(
     }
     
     // Добавляем часть в список (если ещё не добавлена)
-    if (std::find(upload->parts.begin(), upload->parts.end(), part_filename) == upload->parts.end()) {
-        upload->parts.push_back(part_filename);
+    if (std::find(upload.parts.begin(), upload.parts.end(), part_filename) == upload.parts.end()) {
+        upload.parts.push_back(part_filename);
     }
     
     LOG(INFO) << "Part uploaded: upload_id=" << upload_id 
@@ -315,15 +315,15 @@ std::optional<std::map<int, std::uintmax_t>> file_manager::get_upload_progress(c
         return std::nullopt;
     }
     
-    const multipart_upload* upload = *upload_opt;
+    const multipart_upload& upload = upload_opt->get();
     
     std::map<int, std::uintmax_t> progress;
     
-    for (const auto& part_name : upload->parts) {
+    for (const auto& part_name : upload.parts) {
         // Извлекаем номер части из имени файла
         try {
             int part_number = std::stoi(part_name.substr(5)); // "part_XXXXX"
-            fs::path part_path = upload->temp_dir / part_name;
+            fs::path part_path = upload.temp_dir / part_name;
             
             if (fs::exists(part_path)) {
                 progress[part_number] = fs::file_size(part_path);
@@ -351,19 +351,19 @@ bool file_manager::complete_multipart_upload(
     std::lock_guard<std::mutex> lock(_mutex);
     
     auto upload_opt = get_upload(upload_id);
-    if (!upload_opt || (*upload_opt)->completed) {
+    if (!upload_opt || upload_opt->get().completed) {
         LOG(WARNING) << "Upload not found or already completed: " << upload_id;
         return false;
     }
     
-    multipart_upload* upload = *upload_opt;
+    multipart_upload& upload = upload_opt->get();
     
     // Проверяем общий размер файла
     uint64_t total_size = 0;
     for (int part_number : part_numbers) {
         std::ostringstream part_name;
         part_name << "part_" << std::setw(5) << std::setfill('0') << part_number;
-        fs::path part_path = upload->temp_dir / part_name.str();
+        fs::path part_path = upload.temp_dir / part_name.str();
         
         if (!fs::exists(part_path)) {
             LOG(ERROR) << "Missing part: " << part_path;
@@ -380,19 +380,19 @@ bool file_manager::complete_multipart_upload(
     }
     
     // Объединяем части
-    if (!merge_parts(*upload, part_numbers)) {
+    if (!merge_parts(upload, part_numbers)) {
         LOG(ERROR) << "Failed to merge parts for upload: " << upload_id;
         return false;
     }
     
     // Помечаем как завершённую
-    upload->completed = true;
+    upload.completed = true;
     
     // Очищаем временные файлы
     cleanup_upload(upload_id);
     
     LOG(INFO) << "Multipart upload completed: " << upload_id 
-              << " (" << upload->filename << ")";
+              << " (" << upload.filename << ")";
     
     return true;
 }
@@ -456,30 +456,27 @@ std::string file_manager::compute_etag_SHA256(const std::vector<char>& data) con
 
 std::string file_manager::compute_etag(const std::vector<char>& data) const
 {
-    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(EVP_MD_CTX_new(), EVP_MD_CTX_free);
     if (!ctx) {
         return "";
     }
     
-    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
-        EVP_MD_CTX_free(ctx);
+    if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) != 1) {
         return "";
     }
     
-    if (EVP_DigestUpdate(ctx, data.data(), data.size()) != 1) {
-        EVP_MD_CTX_free(ctx);
+    if (EVP_DigestUpdate(ctx.get(), data.data(), data.size()) != 1) {
         return "";
     }
     
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len;
     
-    if (EVP_DigestFinal_ex(ctx, digest, &digest_len) != 1) {
-        EVP_MD_CTX_free(ctx);
+    if (EVP_DigestFinal_ex(ctx.get(), digest, &digest_len) != 1) {
         return "";
     }
     
-    EVP_MD_CTX_free(ctx);
+    // ctx automatically freed
     
     std::stringstream ss;
     for (unsigned int i = 0; i < digest_len; ++i) {
@@ -533,22 +530,22 @@ std::string file_manager::generate_upload_id() const
     return ss.str();
 }
 
-std::optional<multipart_upload*> file_manager::get_upload(const std::string& upload_id)
+std::optional<std::reference_wrapper<multipart_upload>> file_manager::get_upload(const std::string& upload_id)
 {
     auto it = _active_uploads.find(upload_id);
     if (it == _active_uploads.end()) {
         return std::nullopt;
     }
-    return &it->second;
+    return std::ref(it->second);
 }
 
-std::optional<const multipart_upload*> file_manager::get_upload(const std::string& upload_id) const
+std::optional<std::reference_wrapper<const multipart_upload>> file_manager::get_upload(const std::string& upload_id) const
 {
     auto it = _active_uploads.find(upload_id);
     if (it == _active_uploads.end()) {
         return std::nullopt;
     }
-    return &it->second;
+    return std::cref(it->second);
 }
 
 bool file_manager::merge_parts(const multipart_upload& upload, const std::vector<int>& part_numbers) {
@@ -612,12 +609,12 @@ void file_manager::cleanup_upload(const std::string& upload_id)
         return;
     }
     
-    const multipart_upload* upload = *upload_opt;
+    const multipart_upload& upload = upload_opt->get();
     
     // Удаляем временную директорию
     try {
-        if (fs::exists(upload->temp_dir)) {
-            fs::remove_all(upload->temp_dir);
+        if (fs::exists(upload.temp_dir)) {
+            fs::remove_all(upload.temp_dir);
             VLOG(2) << "Upload cleanup completed: " << upload_id;
         }
     } catch (const std::exception& e) {
@@ -831,22 +828,22 @@ std::optional<std::uintmax_t> file_manager::get_stream_upload_progress(const std
     return upload.bytes_written;
 }
 
-std::optional<stream_upload*> file_manager::get_stream_upload(const std::string& stream_id)
+std::optional<std::reference_wrapper<stream_upload>> file_manager::get_stream_upload(const std::string& stream_id)
 {
     auto it = _active_stream_uploads.find(stream_id);
     if (it == _active_stream_uploads.end()) {
         return std::nullopt;
     }
-    return &it->second;
+    return std::ref(it->second);
 }
 
-std::optional<const stream_upload*> file_manager::get_stream_upload(const std::string& stream_id) const
+std::optional<std::reference_wrapper<const stream_upload>> file_manager::get_stream_upload(const std::string& stream_id) const
 {
     auto it = _active_stream_uploads.find(stream_id);
     if (it == _active_stream_uploads.end()) {
         return std::nullopt;
     }
-    return &it->second;
+    return std::cref(it->second);
 }
 
 void file_manager::cleanup_stream_upload(const std::string& stream_id)
@@ -857,12 +854,12 @@ void file_manager::cleanup_stream_upload(const std::string& stream_id)
         return;
     }
     
-    const stream_upload* upload = *upload_opt;
+    const stream_upload& upload = upload_opt->get();
     
     // Удаляем временный файл
     try {
-        if (fs::exists(upload->temp_file)) {
-            fs::remove(upload->temp_file);
+        if (fs::exists(upload.temp_file)) {
+            fs::remove(upload.temp_file);
             VLOG(2) << "Stream upload cleanup completed: " << stream_id;
         }
     } catch (const std::exception& e) {
