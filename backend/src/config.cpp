@@ -31,6 +31,7 @@ void from_json(const nlohmann::json& j, server_config& cfg) {
     if (j.contains("storage_path")) j.at("storage_path").get_to(cfg.storage_path);
     if (j.contains("keys_file")) j.at("keys_file").get_to(cfg.keys_file);
     if (j.contains("users_file")) j.at("users_file").get_to(cfg.users_file);
+    if (j.contains("acls_file")) j.at("acls_file").get_to(cfg.acls_file);
     if (j.contains("enable_auth")) j.at("enable_auth").get_to(cfg.enable_auth);
     if (j.contains("enable_ssl")) j.at("enable_ssl").get_to(cfg.enable_ssl);
     if (j.contains("use_letsencrypt")) j.at("use_letsencrypt").get_to(cfg.use_letsencrypt);
@@ -81,6 +82,7 @@ void to_json(nlohmann::json& j, const server_config& cfg) {
     j["storage_path"] = cfg.storage_path;
     j["keys_file"] = cfg.keys_file;
     j["users_file"] = cfg.users_file;
+    j["acls_file"] = cfg.acls_file;
     j["enable_auth"] = cfg.enable_auth;
     j["enable_ssl"] = cfg.enable_ssl;
     j["use_letsencrypt"] = cfg.use_letsencrypt;

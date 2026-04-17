@@ -15,6 +15,7 @@ struct server_config {
     std::string storage_path = "./storage";
     std::string keys_file = "./access_keys.csv";
     std::string users_file = "./users.csv";
+    std::string acls_file = "./acls.json";
     bool enable_auth = true;
     bool enable_ssl = false;
     bool use_letsencrypt = false;

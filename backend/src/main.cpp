@@ -289,6 +289,7 @@ int main(int argc, char* argv[])
     std::string storage_path = cfg.storage_path;
     std::string keys_file = cfg.keys_file;
     std::string users_file = cfg.users_file;
+    std::string acls_file = cfg.acls_file;
     bool enable_auth = cfg.enable_auth;
     bool enable_ssl = cfg.enable_ssl;
     
@@ -542,7 +543,7 @@ int main(int argc, char* argv[])
             };
         }
         
-        s3_server server(address, port, storage_path, keys_file, users_file, ssl_cfg, cors_cfg, cfg.upload_limits, cfg.keep_alive, cfg.rate_limiter);
+        s3_server server(address, port, storage_path, keys_file, users_file, acls_file, ssl_cfg, cors_cfg, cfg.upload_limits, cfg.keep_alive, cfg.rate_limiter);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;
@@ -555,6 +556,9 @@ int main(int argc, char* argv[])
         }
         if (!users_file.empty()) {
             std::cout << "Authorization: ENABLED (users: " << users_file << ")" << std::endl;
+        }
+        if (!acls_file.empty()) {
+            std::cout << "ACLs: ENABLED (file: " << acls_file << ")" << std::endl;
         }
         if (use_ssl) {
             if (use_letsencrypt) {

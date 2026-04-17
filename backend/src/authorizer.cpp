@@ -159,6 +159,151 @@ bool authorizer::save_users(const std::string& filepath) const {
     return true;
 }
 
+bool authorizer::load_acls(const std::string& filepath) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    std::ifstream file(filepath);
+    if (!file) {
+        LOG(WARNING) << "ACLs file not found: " << filepath;
+        return false;
+    }
+    
+    try {
+        json data = json::parse(file);
+        if (!data.is_array()) {
+            LOG(ERROR) << "ACLs file must contain a JSON array";
+            return false;
+        }
+        
+        _resource_acls.clear();
+        for (const auto& item : data) {
+            resource_acl acl;
+            
+            // resource_path (обязателен)
+            if (!item.contains("resource_path") || !item["resource_path"].is_string()) {
+                LOG(WARNING) << "Skipping ACL entry: missing resource_path";
+                continue;
+            }
+            acl.resource_path = item["resource_path"];
+            
+            // is_public (опционально)
+            if (item.contains("is_public") && item["is_public"].is_boolean()) {
+                acl.is_public = item["is_public"];
+            } else {
+                acl.is_public = false;
+            }
+            
+            // owner_user_id (опционально)
+            if (item.contains("owner_user_id") && item["owner_user_id"].is_string()) {
+                acl.owner_user_id = item["owner_user_id"];
+            }
+            
+            // user_permissions (опционально)
+            if (item.contains("user_permissions") && item["user_permissions"].is_object()) {
+                for (const auto& [user_id, perms] : item["user_permissions"].items()) {
+                    if (perms.is_array()) {
+                        std::set<permission_type> perm_set;
+                        for (const auto& perm_str : perms) {
+                            if (perm_str.is_string()) {
+                                auto perm_opt = parse_permission(perm_str);
+                                if (perm_opt) {
+                                    perm_set.insert(*perm_opt);
+                                } else {
+                                    LOG(WARNING) << "Invalid permission string: " << perm_str << " for user " << user_id;
+                                }
+                            }
+                        }
+                        if (!perm_set.empty()) {
+                            acl.user_permissions[user_id] = perm_set;
+                        }
+                    }
+                }
+            }
+            
+            // group_permissions (опционально)
+            if (item.contains("group_permissions") && item["group_permissions"].is_object()) {
+                for (const auto& [group_name, perms] : item["group_permissions"].items()) {
+                    if (perms.is_array()) {
+                        std::set<permission_type> perm_set;
+                        for (const auto& perm_str : perms) {
+                            if (perm_str.is_string()) {
+                                auto perm_opt = parse_permission(perm_str);
+                                if (perm_opt) {
+                                    perm_set.insert(*perm_opt);
+                                } else {
+                                    LOG(WARNING) << "Invalid permission string: " << perm_str << " for group " << group_name;
+                                }
+                            }
+                        }
+                        if (!perm_set.empty()) {
+                            acl.group_permissions[group_name] = perm_set;
+                        }
+                    }
+                }
+            }
+            
+            _resource_acls[acl.resource_path] = acl;
+            LOG(INFO) << "Loaded ACL for resource: " << acl.resource_path;
+        }
+        
+        LOG(INFO) << "Loaded " << _resource_acls.size() << " ACLs from " << filepath;
+        return true;
+    } catch (const json::exception& e) {
+        LOG(ERROR) << "Failed to parse ACLs file: " << e.what();
+        return false;
+    }
+}
+
+bool authorizer::save_acls(const std::string& filepath) const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    
+    json data = json::array();
+    for (const auto& [path, acl] : _resource_acls) {
+        json item;
+        item["resource_path"] = acl.resource_path;
+        item["is_public"] = acl.is_public;
+        if (acl.owner_user_id.has_value()) {
+            item["owner_user_id"] = *acl.owner_user_id;
+        } else {
+            item["owner_user_id"] = nullptr;
+        }
+        
+        // user_permissions
+        json user_perms = json::object();
+        for (const auto& [user_id, perms] : acl.user_permissions) {
+            json perm_array = json::array();
+            for (const auto& perm : perms) {
+                perm_array.push_back(permission_to_string(perm));
+            }
+            user_perms[user_id] = perm_array;
+        }
+        item["user_permissions"] = user_perms;
+        
+        // group_permissions
+        json group_perms = json::object();
+        for (const auto& [group_name, perms] : acl.group_permissions) {
+            json perm_array = json::array();
+            for (const auto& perm : perms) {
+                perm_array.push_back(permission_to_string(perm));
+            }
+            group_perms[group_name] = perm_array;
+        }
+        item["group_permissions"] = group_perms;
+        
+        data.push_back(item);
+    }
+    
+    std::ofstream file(filepath);
+    if (!file) {
+        LOG(ERROR) << "Failed to open ACLs file for writing: " << filepath;
+        return false;
+    }
+    
+    file << data.dump(4);
+    LOG(INFO) << "Saved " << _resource_acls.size() << " ACLs to " << filepath;
+    return true;
+}
+
 std::optional<user> authorizer::create_user(
     const std::string& username,
     const std::string& email,

@@ -114,6 +114,7 @@ public:
               const std::string& storage_path,
               const std::string& keys_file = "",
               const std::string& users_file = "",
+              const std::string& acls_file = "",
               std::optional<ssl_config> ssl_cfg = std::nullopt,
               std::optional<cors_config> cors_cfg = std::nullopt,
               upload_limits_config upload_limits = upload_limits_config(),
@@ -134,6 +135,7 @@ private:
     std::string _storage_path;
     std::string _keys_file;
     std::string _users_file;
+    std::string _acls_file;
     asio::io_context _io_context;
     tcp::acceptor _acceptor;
     asio::steady_timer _cleanup_timer;

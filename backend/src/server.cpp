@@ -13,6 +13,7 @@ s3_server::s3_server(const std::string& address,
     const std::string& storage_path,
     const std::string& keys_file,
     const std::string& users_file,
+    const std::string& acls_file,
     std::optional<ssl_config> ssl_cfg,
     std::optional<cors_config> cors_cfg,
     upload_limits_config upload_limits,
@@ -23,6 +24,7 @@ s3_server::s3_server(const std::string& address,
     , _storage_path(storage_path)
     , _keys_file(keys_file)
     , _users_file(users_file)
+    , _acls_file(acls_file)
     , _io_context()
     , _acceptor(_io_context)
     , _cleanup_timer(_io_context)
@@ -46,17 +48,30 @@ s3_server::s3_server(const std::string& address,
         }
     }
     
-    // Инициализируем авторизатор, если указан файл пользователей
-    if (!_users_file.empty()) {
+    // Инициализируем авторизатор, если указан файл пользователей или ACL
+    if (!_users_file.empty() || !_acls_file.empty()) {
         _authorizer = std::make_unique<authorizer>();
         _authorization_enabled = true;
 
-        if (!_authorizer->load_users(_users_file)) {
-            LOG(WARNING) << "Failed to load users from " << _users_file
-                         << ", starting with empty user list";
+        if (!_users_file.empty()) {
+            if (!_authorizer->load_users(_users_file)) {
+                LOG(WARNING) << "Failed to load users from " << _users_file
+                             << ", starting with empty user list";
+            } else {
+                LOG(INFO) << "Loaded users from " << _users_file;
+            }
         }
 
-        LOG(INFO) << "Authorization enabled with users file: " << _users_file;
+        if (!_acls_file.empty()) {
+            if (!_authorizer->load_acls(_acls_file)) {
+                LOG(WARNING) << "Failed to load ACLs from " << _acls_file
+                             << ", starting with empty ACL list";
+            } else {
+                LOG(INFO) << "Loaded ACLs from " << _acls_file;
+            }
+        }
+
+        LOG(INFO) << "Authorization enabled";
     }
     
     if (_ssl_enabled) {

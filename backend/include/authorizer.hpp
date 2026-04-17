@@ -227,6 +227,12 @@ public:
     // Сохранить пользователей в JSON-файл
     bool save_users(const std::string& filepath) const;
     
+    // Загрузить ACL из JSON-файла
+    bool load_acls(const std::string& filepath);
+    
+    // Сохранить ACL в JSON-файл
+    bool save_acls(const std::string& filepath) const;
+    
 private:
     mutable std::recursive_mutex _mutex;
     std::map<std::string, user> _users;
