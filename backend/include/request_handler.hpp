@@ -4,6 +4,7 @@
 #include <string>
 #include <functional>
 #include <optional>
+#include <memory>
 #include <boost/beast.hpp>
 #include <glog/logging.h>
 #include "file_manager.hpp"
@@ -30,8 +31,8 @@ class request_handler {
 public:
     explicit request_handler(
         file_manager& file_manager,
-        authenticator* auth = nullptr,
-        authorizer* authorizer = nullptr
+        std::shared_ptr<authenticator> auth = nullptr,
+        std::shared_ptr<authorizer> authorizer = nullptr
     );
 
     // template <class Body, class Allocator, class Send>
@@ -80,9 +81,11 @@ public:
         
         // Определяем требуемое разрешение для запроса
         auto required_perm = get_required_permission(req);
+        VLOG(2) << "Required permission: " << (required_perm ? permission_to_string(*required_perm) : "none");
         
         // Аутентификация
         auth_result auth_result = authenticate_request(req);
+        VLOG(2) << "Authentication result: authenticated=" << auth_result.authenticated << ", user_id=" << (auth_result.user_id ? *auth_result.user_id : "none");
         
         // Авторизация или публичный доступ
         bool access_granted = false;
@@ -205,8 +208,8 @@ public:
 private:
     friend class RequestHandlerTest;
     file_manager& _file_manager;
-    authenticator* _authenticator;
-    authorizer* _authorizer;
+    std::shared_ptr<authenticator> _authenticator;
+    std::shared_ptr<authorizer> _authorizer;
     bool _auth_enabled = false;
     bool _authorization_enabled = false;
     std::optional<s3_server::cors_config> _cors_config;

@@ -151,8 +151,8 @@ private:
     bool _ssl_enabled = false;
     bool _auth_enabled = false;
     bool _authorization_enabled = false;
-    std::unique_ptr<authenticator> _authenticator;
-    std::unique_ptr<authorizer> _authorizer;
+    std::shared_ptr<authenticator> _authenticator;
+    std::shared_ptr<authorizer> _authorizer;
     std::unique_ptr<rate_limiter> _rate_limiter;
 
     upload_limits_config _upload_limits;

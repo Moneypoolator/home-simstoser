@@ -32,8 +32,8 @@ static std::map<std::string, std::string> mime_types = {
 
 request_handler::request_handler(
     file_manager& file_manager,
-    authenticator* auth,
-    authorizer* authorizer)
+    std::shared_ptr<authenticator> auth,
+    std::shared_ptr<authorizer> authorizer)
     : _file_manager(file_manager)
     , _authenticator(auth)
     , _authorizer(authorizer)

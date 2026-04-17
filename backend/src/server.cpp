@@ -38,7 +38,7 @@ s3_server::s3_server(const std::string& address,
     
     // Инициализируем аутентификатор, если указан файл ключей
     if (!_keys_file.empty()) {
-        _authenticator = std::make_unique<authenticator>();
+        _authenticator = std::make_shared<authenticator>();
         
         if (_authenticator->load_keys(_keys_file)) {
             _auth_enabled = true;
@@ -50,7 +50,7 @@ s3_server::s3_server(const std::string& address,
     
     // Инициализируем авторизатор, если указан файл пользователей или ACL
     if (!_users_file.empty() || !_acls_file.empty()) {
-        _authorizer = std::make_unique<authorizer>();
+        _authorizer = std::make_shared<authorizer>();
         _authorization_enabled = true;
 
         if (!_users_file.empty()) {
@@ -474,7 +474,7 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
                 _upload_limits.max_temp_storage_total
             };
             file_manager fm(_storage_path, limits);
-            request_handler handler(fm, _authenticator.get(), _authorizer.get());
+            request_handler handler(fm, _authenticator, _authorizer);
             handler.set_auth_enabled(_auth_enabled);
             handler.set_authorization_enabled(_authorization_enabled);
             handler.set_cors_config(_cors_config);
@@ -677,7 +677,7 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
                 _upload_limits.max_temp_storage_total
             };
             file_manager fm(_storage_path, limits);
-            request_handler handler(fm, _authenticator.get(), _authorizer.get());
+            request_handler handler(fm, _authenticator, _authorizer);
             handler.set_auth_enabled(_auth_enabled);
             handler.set_authorization_enabled(_authorization_enabled);
             handler.set_cors_config(_cors_config);
