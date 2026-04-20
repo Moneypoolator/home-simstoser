@@ -36,6 +36,9 @@ struct server_config {
     // Rate limiter configuration
     rate_limiter_config rate_limiter;
     
+    // Cache configuration
+    cache_config cache;
+    
     // Logging configuration
     struct logging_config {
         int log_level = 0; // glog v level

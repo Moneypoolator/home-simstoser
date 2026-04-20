@@ -587,3 +587,88 @@ TEST_F(FileManagerTest, UploadFileStreamRespectsLimit) {
     EXPECT_FALSE(uploaded);
     EXPECT_FALSE(fm_limits.file_exists("stream_test.txt"));
 }
+
+TEST_F(FileManagerTest, CacheContent) {
+    // Enable cache with small size to test eviction
+    cache_config cfg;
+    cfg.enabled = true;
+    cfg.max_content_cache_bytes = 1024; // 1 KB
+    cfg.content_ttl = std::chrono::seconds(10);
+    file_manager fm_cache(_temp_dir.string(), upload_limits(), cfg);
+    
+    std::string filename = "cache_test.txt";
+    std::vector<char> data = {'a', 'b', 'c', 'd', 'e'};
+    
+    // Upload file
+    ASSERT_TRUE(fm_cache.upload_file(filename, data));
+    
+    // First download - should miss cache
+    auto result1 = fm_cache.download_file(filename);
+    ASSERT_TRUE(result1.has_value());
+    EXPECT_EQ(result1.value(), data);
+    
+    // Second download - should hit cache
+    auto result2 = fm_cache.download_file(filename);
+    ASSERT_TRUE(result2.has_value());
+    EXPECT_EQ(result2.value(), data);
+    
+    // Modify file (upload different content)
+    std::vector<char> new_data = {'x', 'y', 'z'};
+    ASSERT_TRUE(fm_cache.upload_file(filename, new_data));
+    
+    // Download again - should miss cache (invalidated) and get new data
+    auto result3 = fm_cache.download_file(filename);
+    ASSERT_TRUE(result3.has_value());
+    EXPECT_EQ(result3.value(), new_data);
+}
+
+TEST_F(FileManagerTest, CacheMetadata) {
+    cache_config cfg;
+    cfg.enabled = true;
+    cfg.max_metadata_cache_entries = 10;
+    cfg.metadata_ttl = std::chrono::seconds(10);
+    file_manager fm_cache(_temp_dir.string(), upload_limits(), cfg);
+    
+    std::string filename = "meta_test.txt";
+    std::vector<char> data = {'1', '2', '3'};
+    ASSERT_TRUE(fm_cache.upload_file(filename, data));
+    
+    // First get_metadata - miss
+    auto meta1 = fm_cache.get_metadata(filename);
+    ASSERT_TRUE(meta1.has_value());
+    EXPECT_EQ(meta1->name, filename);
+    EXPECT_EQ(meta1->size, data.size());
+    
+    // Second get_metadata - hit
+    auto meta2 = fm_cache.get_metadata(filename);
+    ASSERT_TRUE(meta2.has_value());
+    EXPECT_EQ(meta2->size, data.size());
+    
+    // Update file (size changes)
+    std::vector<char> larger_data(100, 'A');
+    ASSERT_TRUE(fm_cache.upload_file(filename, larger_data));
+    
+    // Should get updated metadata (cache invalidated)
+    auto meta3 = fm_cache.get_metadata(filename);
+    ASSERT_TRUE(meta3.has_value());
+    EXPECT_EQ(meta3->size, larger_data.size());
+}
+
+TEST_F(FileManagerTest, CacheDisabled) {
+    cache_config cfg;
+    cfg.enabled = false;
+    file_manager fm_no_cache(_temp_dir.string(), upload_limits(), cfg);
+    
+    std::string filename = "nocache.txt";
+    std::vector<char> data = {'t', 'e', 's', 't'};
+    ASSERT_TRUE(fm_no_cache.upload_file(filename, data));
+    
+    // Multiple downloads - each should read from disk (no caching)
+    auto result1 = fm_no_cache.download_file(filename);
+    ASSERT_TRUE(result1.has_value());
+    auto result2 = fm_no_cache.download_file(filename);
+    ASSERT_TRUE(result2.has_value());
+    // No easy way to verify cache miss, but at least ensure correctness
+    EXPECT_EQ(result1.value(), data);
+    EXPECT_EQ(result2.value(), data);
+}

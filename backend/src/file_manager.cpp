@@ -15,8 +15,10 @@
 #include <nlohmann/json.hpp>
 
 
-file_manager::file_manager(const std::string& storage_path, const upload_limits& limits)
-    : _storage_dir(storage_path), _limits(limits)
+file_manager::file_manager(const std::string& storage_path, const upload_limits& limits, const cache_config& cache_cfg)
+    : _storage_dir(storage_path), _limits(limits), _cache_cfg(cache_cfg),
+      _content_cache(cache_cfg.max_content_cache_bytes, cache_cfg.content_ttl),
+      _metadata_cache(cache_cfg.max_metadata_cache_entries * sizeof(file_metadata), cache_cfg.metadata_ttl)
 {
     // Создаем директорию для хранения, если она не существует
     fs::create_directories(_storage_dir);
@@ -28,6 +30,11 @@ file_manager::file_manager(const std::string& storage_path, const upload_limits&
         _storage_dir_canonical = fs::weakly_canonical(_storage_dir);
     }
     LOG(INFO) << "File manager initialized. Storage path: " << _storage_dir.string();
+    if (_cache_cfg.enabled) {
+        LOG(INFO) << "Cache enabled: content=" << cache_cfg.max_content_cache_bytes << " bytes, metadata TTL=" << cache_cfg.metadata_ttl.count() << "s";
+    } else {
+        LOG(INFO) << "Cache disabled";
+    }
 }
 
 file_manager::~file_manager()
@@ -76,12 +83,32 @@ bool file_manager::upload_file(const std::string& filename, const std::vector<ch
 }
 
 std::optional<std::vector<char>> file_manager::download_file(const std::string& filename) {
+    // Check cache first
+    if (_cache_cfg.enabled) {
+        auto cached = _content_cache.get(filename);
+        if (cached) {
+            VLOG(2) << "Cache hit for file content: " << filename;
+            return *cached;
+        }
+    }
+
     std::stringstream ss;
     if (!download_file_stream(filename, ss)) {
         return std::nullopt;
     }
     std::string str = ss.str();
-    return std::vector<char>(str.begin(), str.end());
+    std::vector<char> data(str.begin(), str.end());
+
+    // Store in cache
+    if (_cache_cfg.enabled) {
+        bool ok = _content_cache.put(filename, data, _cache_cfg.content_ttl);
+        if (ok) {
+            VLOG(2) << "Cached file content: " << filename << " (" << data.size() << " bytes)";
+        } else {
+            VLOG(2) << "Could not cache file content (size limit?): " << filename;
+        }
+    }
+    return data;
 }
 
 bool file_manager::delete_file(const std::string& filename)
@@ -97,7 +124,12 @@ bool file_manager::delete_file(const std::string& filename)
             return false;
         }
         
-        return fs::remove(file_path);
+        bool removed = fs::remove(file_path);
+        if (removed) {
+            // Invalidate cache for deleted file
+            invalidate_cache_for_file(filename);
+        }
+        return removed;
     } catch (const std::exception& e) {
         LOG(ERROR) << "Exception during file deletion: " << e.what();
         return false;
@@ -166,6 +198,15 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
         return std::nullopt;
     }
 
+    // Check cache first
+    if (_cache_cfg.enabled) {
+        auto cached = _metadata_cache.get(filename);
+        if (cached) {
+            VLOG(2) << "Cache hit for metadata: " << filename;
+            return *cached;
+        }
+    }
+
     try {
         fs::path file_path = _storage_dir / filename;
         
@@ -185,6 +226,15 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
         
         VLOG(2) << "Metadata retrieved for: " << filename << " (" << meta.size << " bytes)";
         
+        // Store in cache
+        if (_cache_cfg.enabled) {
+            bool ok = _metadata_cache.put(filename, meta, _cache_cfg.metadata_ttl);
+            if (ok) {
+                VLOG(2) << "Cached metadata: " << filename;
+            } else {
+                VLOG(2) << "Could not cache metadata (size limit?): " << filename;
+            }
+        }
         return meta;
     } catch (const std::exception& e) {
         LOG(ERROR) << "Exception getting metadata: " << filename << " - " << e.what();
@@ -922,6 +972,8 @@ bool file_manager::upload_file_stream(const std::string& filename, std::istream&
         
         file.close();
         logging::log_file_operation("UPLOAD_STREAM", filename, fs::file_size(file_path));
+        // Invalidate cache for this file since content has changed
+        invalidate_cache_for_file(filename);
         return true;
     } catch (const std::exception& e) {
         LOG(ERROR) << "Exception in upload_file_stream: " << e.what();
@@ -993,7 +1045,11 @@ bool file_manager::set_custom_metadata(const std::string& filename, const std::m
         LOG(WARNING) << "File does not exist: " << filename;
         return false;
     }
-    return save_custom_metadata(filename, metadata);
+    bool ok = save_custom_metadata(filename, metadata);
+    if (ok) {
+        invalidate_metadata_cache(filename);
+    }
+    return ok;
 }
 
 std::optional<std::map<std::string, std::string>> file_manager::get_custom_metadata(const std::string& filename) const {
@@ -1050,6 +1106,25 @@ bool file_manager::download_file_stream(const std::string& filename, std::ostrea
     
     close(fd);
     return offset == size;
+}
+
+// ========== CACHE MANAGEMENT ==========
+
+void file_manager::invalidate_content_cache(const std::string& filename) {
+    if (!_cache_cfg.enabled) return;
+    _content_cache.erase(filename);
+    VLOG(2) << "Content cache invalidated for: " << filename;
+}
+
+void file_manager::invalidate_metadata_cache(const std::string& filename) {
+    if (!_cache_cfg.enabled) return;
+    _metadata_cache.erase(filename);
+    VLOG(2) << "Metadata cache invalidated for: " << filename;
+}
+
+void file_manager::invalidate_cache_for_file(const std::string& filename) {
+    invalidate_content_cache(filename);
+    invalidate_metadata_cache(filename);
 }
 
 #else

@@ -134,6 +134,29 @@ void to_json(nlohmann::json& j, const keep_alive_config& cfg) {
     j["max_requests"] = cfg.max_requests;
 }
 
+// cache_config
+void from_json(const nlohmann::json& j, cache_config& cfg) {
+    if (j.contains("max_content_cache_bytes")) j.at("max_content_cache_bytes").get_to(cfg.max_content_cache_bytes);
+    if (j.contains("max_metadata_cache_entries")) j.at("max_metadata_cache_entries").get_to(cfg.max_metadata_cache_entries);
+    if (j.contains("content_ttl")) {
+        int seconds = j.at("content_ttl").get<int>();
+        cfg.content_ttl = std::chrono::seconds(seconds);
+    }
+    if (j.contains("metadata_ttl")) {
+        int seconds = j.at("metadata_ttl").get<int>();
+        cfg.metadata_ttl = std::chrono::seconds(seconds);
+    }
+    if (j.contains("enabled")) j.at("enabled").get_to(cfg.enabled);
+}
+
+void to_json(nlohmann::json& j, const cache_config& cfg) {
+    j["max_content_cache_bytes"] = cfg.max_content_cache_bytes;
+    j["max_metadata_cache_entries"] = cfg.max_metadata_cache_entries;
+    j["content_ttl"] = cfg.content_ttl.count();
+    j["metadata_ttl"] = cfg.metadata_ttl.count();
+    j["enabled"] = cfg.enabled;
+}
+
 // ssl_config
 void from_json(const nlohmann::json& j, s3_server::ssl_config& cfg) {
     if (j.contains("cert_file")) j.at("cert_file").get_to(cfg.cert_file);

@@ -35,6 +35,14 @@ using tcp = asio::ip::tcp;
         unsigned int max_requests = 100;    // Maximum requests per connection
     };
 
+    struct cache_config {
+        size_t max_content_cache_bytes = 100 * 1024 * 1024; // 100 MB for file content
+        size_t max_metadata_cache_entries = 1000;           // up to 1000 metadata entries
+        std::chrono::seconds content_ttl = std::chrono::seconds(300); // 5 minutes
+        std::chrono::seconds metadata_ttl = std::chrono::seconds(600); // 10 minutes
+        bool enabled = true;
+    };
+
 class s3_server {
 public:
     struct ssl_config {

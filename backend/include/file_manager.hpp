@@ -10,6 +10,8 @@
 #include <chrono>
 #include <deque>
 #include <functional>
+#include "cache.hpp"
+#include "server.hpp"
 
 namespace fs = std::filesystem;
 
@@ -51,7 +53,8 @@ struct upload_limits {
 class file_manager {
 public:
     explicit file_manager(const std::string& storage_path,
-                          const upload_limits& limits = upload_limits());
+                          const upload_limits& limits = upload_limits(),
+                          const cache_config& cache_cfg = cache_config());
     ~file_manager();
 
     // Загрузка файла
@@ -140,8 +143,16 @@ private:
     std::map<std::string, stream_upload> _active_stream_uploads;
 
     upload_limits _limits;
+    cache_config _cache_cfg;
+    mutable file_content_cache _content_cache;
+    mutable metadata_cache _metadata_cache;
     // Функция для подсчёта текущего объёма временных файлов
     uint64_t get_current_temp_storage_usage() const;
+
+    // Cache management
+    void invalidate_content_cache(const std::string& filename);
+    void invalidate_metadata_cache(const std::string& filename);
+    void invalidate_cache_for_file(const std::string& filename);
     
    // Вычисление ETag из данных
     std::string compute_etag(const std::vector<char>& data) const;
