@@ -102,6 +102,41 @@ TEST_F(FileManagerTest, GetMetadata) {
     EXPECT_FALSE(metadata->etag.empty());
 }
 
+TEST_F(FileManagerTest, CustomMetadata) {
+    // Arrange
+    std::string filename = "custom_meta.txt";
+    std::vector<char> data = {'d', 'a', 't', 'a'};
+    _file_manager->upload_file(filename, data);
+    
+    std::map<std::string, std::string> meta = {
+        {"author", "testuser"},
+        {"content-type", "text/plain"},
+        {"description", "test file"}
+    };
+    
+    // Act: set custom metadata
+    bool set_success = _file_manager->set_custom_metadata(filename, meta);
+    EXPECT_TRUE(set_success);
+    
+    // Retrieve via get_metadata
+    auto metadata = _file_manager->get_metadata(filename);
+    ASSERT_TRUE(metadata.has_value());
+    EXPECT_EQ(metadata->custom_metadata, meta);
+    
+    // Retrieve via get_custom_metadata
+    auto custom_only = _file_manager->get_custom_metadata(filename);
+    ASSERT_TRUE(custom_only.has_value());
+    EXPECT_EQ(*custom_only, meta);
+    
+    // Update metadata
+    std::map<std::string, std::string> updated = {{"author", "newuser"}};
+    set_success = _file_manager->set_custom_metadata(filename, updated);
+    EXPECT_TRUE(set_success);
+    auto updated_metadata = _file_manager->get_metadata(filename);
+    ASSERT_TRUE(updated_metadata.has_value());
+    EXPECT_EQ(updated_metadata->custom_metadata, updated);
+}
+
 TEST_F(FileManagerTest, ListFilesEmpty) {
     // Act
     auto files = _file_manager->list_files();

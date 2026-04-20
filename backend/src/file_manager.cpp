@@ -12,6 +12,7 @@
 
 #include "path_utils.hpp"
 #include "logging.hpp"
+#include <nlohmann/json.hpp>
 
 
 file_manager::file_manager(const std::string& storage_path, const upload_limits& limits)
@@ -178,6 +179,9 @@ std::optional<file_metadata> file_manager::get_metadata(const std::string& filen
         meta.size = fs::file_size(file_path);
         meta.last_modified = fs::last_write_time(file_path);
         meta.etag = compute_etag(file_path);
+        // Загружаем пользовательские метаданные
+        auto custom = load_custom_metadata(filename);
+        meta.custom_metadata = custom.value_or(std::map<std::string, std::string>{});
         
         VLOG(2) << "Metadata retrieved for: " << filename << " (" << meta.size << " bytes)";
         
@@ -923,6 +927,81 @@ bool file_manager::upload_file_stream(const std::string& filename, std::istream&
         LOG(ERROR) << "Exception in upload_file_stream: " << e.what();
         return false;
     }
+}
+
+// ========== МЕТАДАННЫЕ ==========
+
+fs::path file_manager::get_metadata_file_path(const std::string& filename) const {
+    fs::path meta_dir = _storage_dir / ".metadata";
+    fs::create_directories(meta_dir);
+    // Используем хеш имени файла для безопасности (избегаем проблем с путями)
+    std::string hash = compute_etag_SHA256(std::vector<char>(filename.begin(), filename.end()));
+    return meta_dir / (hash + ".json");
+}
+
+std::optional<std::map<std::string, std::string>> file_manager::load_custom_metadata(const std::string& filename) const {
+    try {
+        fs::path meta_path = get_metadata_file_path(filename);
+        if (!fs::exists(meta_path) || !fs::is_regular_file(meta_path)) {
+            return std::nullopt;
+        }
+        std::ifstream file(meta_path);
+        if (!file) {
+            LOG(WARNING) << "Cannot open metadata file: " << meta_path.string();
+            return std::nullopt;
+        }
+        nlohmann::json json;
+        file >> json;
+        std::map<std::string, std::string> result;
+        for (auto& [key, value] : json.items()) {
+            if (value.is_string()) {
+                result[key] = value.get<std::string>();
+            }
+        }
+        return result;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception loading custom metadata: " << e.what();
+        return std::nullopt;
+    }
+}
+
+bool file_manager::save_custom_metadata(const std::string& filename, const std::map<std::string, std::string>& metadata) const {
+    try {
+        fs::path meta_path = get_metadata_file_path(filename);
+        nlohmann::json json = metadata;
+        std::ofstream file(meta_path);
+        if (!file) {
+            LOG(ERROR) << "Cannot write metadata file: " << meta_path.string();
+            return false;
+        }
+        file << json.dump(4);
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception saving custom metadata: " << e.what();
+        return false;
+    }
+}
+
+bool file_manager::set_custom_metadata(const std::string& filename, const std::map<std::string, std::string>& metadata) {
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
+        return false;
+    }
+    // Проверяем, существует ли файл
+    fs::path file_path = _storage_dir / filename;
+    if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
+        LOG(WARNING) << "File does not exist: " << filename;
+        return false;
+    }
+    return save_custom_metadata(filename, metadata);
+}
+
+std::optional<std::map<std::string, std::string>> file_manager::get_custom_metadata(const std::string& filename) const {
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Attempted unsafe path access: " << filename;
+        return std::nullopt;
+    }
+    return load_custom_metadata(filename);
 }
 
 

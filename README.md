@@ -19,6 +19,7 @@ Home S3 Storage is a self-hosted file storage solution that implements basic Ama
 - **User Management**: Role-based access control with configurable permissions
 - **File Preview**: Built-in preview for common file types (images, PDFs, text files)
 - **SSL/TLS Support**: Secure HTTPS connections with configurable certificates
+- **Object Metadata**: Custom metadata support via `x-amz-meta-*` headers (S3 compatible)
 
 ### Architecture
 

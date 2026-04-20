@@ -18,6 +18,7 @@ struct file_metadata {
     std::uintmax_t size;
     fs::file_time_type last_modified;
     std::string etag;  // MD5 или другой хеш
+    std::map<std::string, std::string> custom_metadata; // пользовательские метаданные (x-amz-meta-*)
 };
 
 // Метаданные для загрузки по частям
@@ -70,6 +71,12 @@ public:
     
     // Получение метаданных
     std::optional<file_metadata> get_metadata(const std::string& filename) const;
+
+    // Установка пользовательских метаданных (x-amz-meta-*)
+    bool set_custom_metadata(const std::string& filename, const std::map<std::string, std::string>& metadata);
+
+    // Получение только пользовательских метаданных
+    std::optional<std::map<std::string, std::string>> get_custom_metadata(const std::string& filename) const;
 
     // Инициировать загрузку по частям
     std::optional<std::string> initiate_multipart_upload(const std::string& filename);
@@ -167,6 +174,17 @@ private:
     
     // Очистка стриминговой загрузки
     void cleanup_stream_upload(const std::string& stream_id);
+    
+    // ========== МЕТАДАННЫЕ ==========
+    
+    // Загрузка пользовательских метаданных из файла
+    std::optional<std::map<std::string, std::string>> load_custom_metadata(const std::string& filename) const;
+    
+    // Сохранение пользовательских метаданных в файл
+    bool save_custom_metadata(const std::string& filename, const std::map<std::string, std::string>& metadata) const;
+    
+    // Получение пути к файлу метаданных
+    fs::path get_metadata_file_path(const std::string& filename) const;
     
     // Вспомогательные методы для копирования с буфером
     bool copy_with_buffer(std::ifstream& src, std::ofstream& dst, size_t buffer_size = 1024 * 1024);

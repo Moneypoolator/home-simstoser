@@ -513,10 +513,16 @@ http::response<http::string_body> request_handler::handle_get(
     http::response<http::string_body> res{http::status::ok, req.version()};
     res.set(http::field::content_type, "application/octet-stream");
     res.set(http::field::content_length, std::to_string(file_size));
+    res.set("X-File-Size", std::to_string(file_size));
     
     auto metadata = _file_manager.get_metadata(filename);
     if (metadata) {
         res.set("ETag", metadata->etag);
+        // Add custom metadata headers
+        for (const auto& [key, value] : metadata->custom_metadata) {
+            std::string header_name = "x-amz-meta-" + key;
+            res.set(header_name, value);
+        }
     }
     
     res.body() = std::move(body);
@@ -553,6 +559,19 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
             http::status::internal_server_error,
             R"({"error": "Failed to upload file"})"
         );
+    }
+    
+    // Extract custom metadata headers (x-amz-meta-*)
+    std::map<std::string, std::string> custom_metadata;
+    auto headers = get_headers_map(req);
+    for (const auto& [header_name, value] : headers) {
+        if (header_name.compare(0, 11, "x-amz-meta-") == 0) {
+            std::string meta_key = header_name.substr(11); // remove prefix
+            custom_metadata[meta_key] = value;
+        }
+    }
+    if (!custom_metadata.empty()) {
+        _file_manager.set_custom_metadata(filename, custom_metadata);
     }
     
     auto metadata = _file_manager.get_metadata(filename);
@@ -1123,6 +1142,7 @@ http::response<http::file_body> request_handler::handle_get_file_body(const http
     // Устанавливаем заголовки
     res.set(http::field::content_type, "application/octet-stream");
     res.set(http::field::content_length, std::to_string(file_size));
+    res.set("X-File-Size", std::to_string(file_size));
     
     // Добавляем ETag, если есть
     auto metadata = _file_manager.get_metadata(filename);
