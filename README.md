@@ -383,20 +383,102 @@ The complete API documentation is available in OpenAPI 3.0 format:
 
 ### Using with S3 Clients
 
-The server provides basic S3 API compatibility. Example using AWS CLI:
+The server provides basic S3 API compatibility and can be used with various S3‑compatible clients. Below are examples for AWS CLI, Boto3 (Python SDK), and MinIO Client.
+
+#### AWS CLI
+
+Configure the AWS CLI to use your local server endpoint, then use standard `aws s3` commands.
 
 ```bash
-# Configure AWS CLI to use custom endpoint
+# Set custom endpoint (default port 9000)
 aws configure set default.s3.endpoint_url http://localhost:9000
 
-# List files (uses /list endpoint internally)
+# Optional: set access keys if authentication is enabled
+aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE
+aws configure set aws_secret_access_key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# List all files (the server uses a flat namespace, bucket name is ignored)
 aws s3 ls s3:///
 
 # Upload a file
-aws s3 cp local-file.txt s3://my-file.txt
+aws s3 cp ./local-file.txt s3://my-file.txt
+
+# Download a file
+aws s3 cp s3://my-file.txt ./downloaded-file.txt
+
+# Delete a file
+aws s3 rm s3://my-file.txt
+
+# Multipart upload for large files (automatically handled by AWS CLI)
+aws s3 cp ./large-file.zip s3://large-file.zip
 ```
 
-**Note:** The server implements a simplified S3 API without bucket support. All files are stored in a flat namespace.
+#### Boto3 (Python SDK)
+
+Use the `boto3` library with a custom endpoint and signature version `s3v4`.
+
+```python
+import boto3
+from botocore.client import Config
+
+# Create a session with access keys (if authentication is enabled)
+session = boto3.session.Session(
+    aws_access_key_id='AKIAIOSFODNN7EXAMPLE',
+    aws_secret_access_key='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+)
+
+# Create an S3 client with custom endpoint
+s3 = session.client(
+    's3',
+    endpoint_url='http://localhost:9000',
+    config=Config(signature_version='s3v4')
+)
+
+# List objects (returns up to 1000 items)
+response = s3.list_objects_v2(Bucket='')  # bucket name is ignored
+for obj in response.get('Contents', []):
+    print(obj['Key'])
+
+# Upload a file
+s3.upload_file('./local-file.txt', '', 'my-file.txt')
+
+# Download a file
+s3.download_file('', 'my-file.txt', './downloaded-file.txt')
+
+# Delete a file
+s3.delete_object(Bucket='', Key='my-file.txt')
+
+# Multipart upload (handled automatically by boto3 for large files)
+s3.upload_file('./large-file.zip', '', 'large-file.zip')
+```
+
+#### MinIO Client (mc)
+
+The MinIO Client (`mc`) is a high‑performance alternative to AWS CLI that supports S3‑compatible endpoints.
+
+First, add your server as an alias:
+
+```bash
+# Add alias (replace `local` with your preferred alias name)
+mc alias set local http://localhost:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# List files
+mc ls local/
+
+# Upload a file
+mc cp ./local-file.txt local/my-file.txt
+
+# Download a file
+mc cp local/my-file.txt ./downloaded-file.txt
+
+# Remove a file
+mc rm local/my-file.txt
+
+# Mirror a directory
+mc mirror ./local-folder/ local/
+```
+
+**Note:** The server implements a simplified S3 API without bucket support. All files are stored in a flat namespace. When using clients, you can use an empty bucket name (`''`) or any placeholder; the server ignores the bucket component.
 
 ## 5. Road Map of Product Development
 
