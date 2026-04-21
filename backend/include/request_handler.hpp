@@ -285,4 +285,12 @@ private:
     
     // Преобразование заголовков в map
     std::map<std::string, std::string> get_headers_map(const http::request<http::string_body>& req) const;
+
+    // Парсинг заголовка Range (bytes=start-end)
+    // Возвращает пару (start, end) или std::nullopt если заголовок отсутствует или некорректен
+    std::optional<std::pair<size_t, size_t>> parse_range_header(const http::request<http::string_body>& req, size_t file_size) const;
+
+    // Установка заголовка Accept-Ranges в ответ
+    template<class Body>
+    void set_accept_ranges_header(http::response<Body>& response) const;
 };

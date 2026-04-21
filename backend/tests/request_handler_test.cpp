@@ -249,3 +249,89 @@ TEST_F(RequestHandlerTest, HandleUploadPartTooLarge) {
     
     fm_small.abort_multipart_upload(*upload_id);
 }
+
+TEST_F(RequestHandlerTest, HandleGetWithRangeHeader) {
+    // Upload a test file
+    std::vector<char> data(2048);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<char>(i % 256);
+    }
+    _file_manager->upload_file("range_test.bin", data);
+    
+    // Request with Range: bytes=0-1023
+    http::request<http::string_body> req{http::verb::get, "/range_test.bin", 11};
+    req.set(http::field::range, "bytes=0-1023");
+    
+    http::response<http::string_body> response = _handler->handle_get(req);
+    
+    EXPECT_EQ(response.result(), http::status::partial_content);
+    EXPECT_EQ(response[http::field::content_type], "application/octet-stream");
+    EXPECT_EQ(response[http::field::accept_ranges], "bytes");
+    EXPECT_EQ(response[http::field::content_range], "bytes 0-1023/2048");
+    EXPECT_EQ(response.body().size(), 1024);
+    
+    // Verify content matches original data
+    for (size_t i = 0; i < 1024; ++i) {
+        EXPECT_EQ(static_cast<unsigned char>(response.body()[i]), static_cast<unsigned char>(data[i]));
+    }
+}
+
+TEST_F(RequestHandlerTest, HandleGetWithRangeHeaderOutOfBounds) {
+    // Upload a test file
+    std::vector<char> data(100);
+    _file_manager->upload_file("small.bin", data);
+    
+    // Range beyond file size
+    http::request<http::string_body> req{http::verb::get, "/small.bin", 11};
+    req.set(http::field::range, "bytes=200-300");
+    
+    http::response<http::string_body> response = _handler->handle_get(req);
+    
+    // Should return 416 Range Not Satisfiable
+    EXPECT_EQ(response.result(), http::status::range_not_satisfiable);
+    EXPECT_EQ(response[http::field::content_range], "bytes */100");
+}
+
+TEST_F(RequestHandlerTest, HandleGetWithInvalidRangeHeader) {
+    std::vector<char> data(100);
+    _file_manager->upload_file("test.bin", data);
+    
+    // Invalid range format
+    http::request<http::string_body> req{http::verb::get, "/test.bin", 11};
+    req.set(http::field::range, "bytes=invalid");
+    
+    http::response<http::string_body> response = _handler->handle_get(req);
+    
+    // Should ignore range and return full file (status ok)
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_EQ(response.body().size(), 100);
+}
+
+TEST_F(RequestHandlerTest, HandleGetWithSuffixRangeNotSupported) {
+    std::vector<char> data(100);
+    _file_manager->upload_file("test.bin", data);
+    
+    // Suffix range (last N bytes) not implemented
+    http::request<http::string_body> req{http::verb::get, "/test.bin", 11};
+    req.set(http::field::range, "bytes=-50");
+    
+    http::response<http::string_body> response = _handler->handle_get(req);
+    
+    // Should ignore range and return full file
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_EQ(response.body().size(), 100);
+}
+
+TEST_F(RequestHandlerTest, HandleGetWithoutRangeHeader) {
+    std::vector<char> data(500);
+    _file_manager->upload_file("full.bin", data);
+    
+    http::request<http::string_body> req{http::verb::get, "/full.bin", 11};
+    // No range header
+    
+    http::response<http::string_body> response = _handler->handle_get(req);
+    
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_EQ(response[http::field::accept_ranges], "bytes");
+    EXPECT_EQ(response.body().size(), 500);
+}

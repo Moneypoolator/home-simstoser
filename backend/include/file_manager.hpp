@@ -63,6 +63,9 @@ public:
     // Скачивание файла
     std::optional<std::vector<char>> download_file(const std::string& filename);
     
+    // Скачивание части файла (range)
+    std::optional<std::vector<char>> download_file_range(const std::string& filename, size_t start, size_t end);
+    
     // Удаление файла
     [[nodiscard]] bool delete_file(const std::string& filename);
     

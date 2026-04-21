@@ -111,6 +111,61 @@ std::optional<std::vector<char>> file_manager::download_file(const std::string& 
     return data;
 }
 
+std::optional<std::vector<char>> file_manager::download_file_range(const std::string& filename, size_t start, size_t end) {
+    if (!is_path_safe(filename)) {
+        LOG(WARNING) << "Unsafe path: " << filename;
+        return std::nullopt;
+    }
+    
+    fs::path file_path = _storage_dir / filename;
+    if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
+        return std::nullopt;
+    }
+    
+    auto file_size = fs::file_size(file_path);
+    if (start >= file_size) {
+        LOG(WARNING) << "Range start beyond file size: " << start << " >= " << file_size;
+        return std::nullopt;
+    }
+    if (end >= file_size) {
+        end = file_size - 1;
+    }
+    if (start > end) {
+        LOG(WARNING) << "Invalid range: start > end";
+        return std::nullopt;
+    }
+    
+    size_t length = end - start + 1;
+    
+    int fd = open(file_path.c_str(), O_RDONLY);
+    if (fd == -1) {
+        LOG(ERROR) << "Cannot open file for reading range: " << filename;
+        return std::nullopt;
+    }
+    
+    // Seek to start
+    if (lseek(fd, static_cast<off_t>(start), SEEK_SET) == static_cast<off_t>(-1)) {
+        LOG(ERROR) << "Failed to seek to position " << start << " in file " << filename;
+        close(fd);
+        return std::nullopt;
+    }
+    
+    std::vector<char> buffer(length);
+    ssize_t total_read = 0;
+    while (total_read < static_cast<ssize_t>(length)) {
+        ssize_t bytes_read = read(fd, buffer.data() + total_read, length - total_read);
+        if (bytes_read <= 0) {
+            LOG(ERROR) << "Failed to read file range, bytes_read=" << bytes_read;
+            close(fd);
+            return std::nullopt;
+        }
+        total_read += bytes_read;
+    }
+    
+    close(fd);
+    return buffer;
+}
+
 bool file_manager::delete_file(const std::string& filename)
 {
     if (!is_path_safe(filename)) {

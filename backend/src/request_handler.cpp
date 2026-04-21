@@ -475,32 +475,47 @@ http::response<http::string_body> request_handler::handle_get(
     }
     
     auto file_size = fs::file_size(full_path);
-    std::ifstream file(full_path, std::ios::binary);
-    if (!file) {
-        return create_response(http::status::internal_server_error, R"({"error": "Cannot open file"})");
-    }
     
-    // Резервируем память
-    std::string body;
-    body.reserve(static_cast<size_t>(file_size));
+    // Parse Range header if present
+    auto range = parse_range_header(req, file_size);
+    bool has_range_header = range.has_value();
+    bool range_satisfiable = false;
+    size_t start = 0;
+    size_t end = 0;
+    size_t content_length = file_size;
     
-    // Буфер 1 MB
-    constexpr size_t buffer_size = 1024 * 1024;
-    std::vector<char> buffer(buffer_size);
-    
-    while (file) {
-        file.read(buffer.data(), buffer_size);
-        std::streamsize bytes = file.gcount();
-        if (bytes > 0) {
-            body.append(buffer.data(), static_cast<size_t>(bytes));
+    if (has_range_header) {
+        start = range->first;
+        end = range->second;
+        // Validate range satisfiability
+        if (start <= end && end < file_size) {
+            range_satisfiable = true;
+            content_length = end - start + 1;
+        } else {
+            // Range unsatisfiable, return 416
+            http::response<http::string_body> res{http::status::range_not_satisfiable, req.version()};
+            res.set(http::field::content_type, "application/json");
+            res.set(http::field::content_range, "bytes */" + std::to_string(file_size));
+            set_accept_ranges_header(res);
+            res.body() = R"({"error": "Range Not Satisfiable"})";
+            res.prepare_payload();
+            return res;
         }
     }
     
-    file.close();
-    
-    http::response<http::string_body> res{http::status::ok, req.version()};
+    // Prepare response
+    http::response<http::string_body> res{range_satisfiable ? http::status::partial_content : http::status::ok, req.version()};
     res.set(http::field::content_type, "application/octet-stream");
-    res.set(http::field::content_length, std::to_string(file_size));
+    res.set(http::field::content_length, std::to_string(content_length));
+    set_accept_ranges_header(res);
+    
+    // Add range-specific headers
+    if (range_satisfiable) {
+        std::string content_range = "bytes " + std::to_string(start) + "-" + std::to_string(end) + "/" + std::to_string(file_size);
+        res.set(http::field::content_range, content_range);
+        VLOG(2) << "Serving range: " << content_range;
+    }
+    
     res.set("X-File-Size", std::to_string(file_size));
     
     auto metadata = _file_manager.get_metadata(filename);
@@ -511,6 +526,34 @@ http::response<http::string_body> request_handler::handle_get(
             std::string header_name = "x-amz-meta-" + key;
             res.set(header_name, value);
         }
+    }
+    
+    // Read file data (full or partial)
+    std::string body;
+    if (range_satisfiable) {
+        auto data = _file_manager.download_file_range(filename, start, end);
+        if (!data) {
+            LOG(ERROR) << "Failed to read file range for " << filename;
+            return create_response(http::status::internal_server_error, R"({"error": "Cannot read file range"})");
+        }
+        body.assign(data->begin(), data->end());
+    } else {
+        // Read whole file (could be optimized but keep existing logic)
+        std::ifstream file(full_path, std::ios::binary);
+        if (!file) {
+            return create_response(http::status::internal_server_error, R"({"error": "Cannot open file"})");
+        }
+        body.reserve(static_cast<size_t>(file_size));
+        constexpr size_t buffer_size = 1024 * 1024;
+        std::vector<char> buffer(buffer_size);
+        while (file) {
+            file.read(buffer.data(), buffer_size);
+            std::streamsize bytes = file.gcount();
+            if (bytes > 0) {
+                body.append(buffer.data(), static_cast<size_t>(bytes));
+            }
+        }
+        file.close();
     }
     
     res.body() = std::move(body);
@@ -1226,6 +1269,59 @@ void request_handler::apply_cors_headers(http::response<Body>& response, const h
 // Explicit template instantiation for the response types we use
 template void request_handler::apply_cors_headers<http::string_body>(http::response<http::string_body>&, const http::request<http::string_body>&) const;
 template void request_handler::apply_cors_headers<http::empty_body>(http::response<http::empty_body>&, const http::request<http::string_body>&) const;
+
+std::optional<std::pair<size_t, size_t>> request_handler::parse_range_header(const http::request<http::string_body>& req, size_t file_size) const {
+    auto range_header = req.find(http::field::range);
+    if (range_header == req.end()) {
+        return std::nullopt;
+    }
+    std::string range_value = std::string(range_header->value());
+    VLOG(2) << "Range header: " << range_value;
+    
+    // Expect format "bytes=start-end"
+    if (range_value.compare(0, 6, "bytes=") != 0) {
+        LOG(WARNING) << "Unsupported range unit: " << range_value;
+        return std::nullopt;
+    }
+    std::string range_spec = range_value.substr(6);
+    size_t dash_pos = range_spec.find('-');
+    if (dash_pos == std::string::npos) {
+        LOG(WARNING) << "Invalid range format: " << range_spec;
+        return std::nullopt;
+    }
+    std::string start_str = range_spec.substr(0, dash_pos);
+    std::string end_str = range_spec.substr(dash_pos + 1);
+    
+    size_t start = 0;
+    size_t end = 0;
+    try {
+        if (!start_str.empty()) {
+            start = std::stoull(start_str);
+        } else {
+            // suffix-byte-range-spec: "-500" means last 500 bytes
+            // Not implemented yet, treat as invalid
+            LOG(WARNING) << "Suffix-byte-range not supported";
+            return std::nullopt;
+        }
+        if (!end_str.empty()) {
+            end = std::stoull(end_str);
+        } else {
+            // open-ended range "start-" means from start to end of file
+            end = file_size - 1;
+        }
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "Failed to parse range numbers: " << e.what();
+        return std::nullopt;
+    }
+    
+    // Note: bounds validation is done by caller
+    return std::make_pair(start, end);
+}
+
+template<class Body>
+void request_handler::set_accept_ranges_header(http::response<Body>& response) const {
+    response.set(http::field::accept_ranges, "bytes");
+}
 
 std::optional<std::string> request_handler::get_query_param(const std::string& query, const std::string& param) const
 {
