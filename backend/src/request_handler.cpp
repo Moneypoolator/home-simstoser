@@ -6,6 +6,7 @@
 #include <sstream>
 #include <glog/logging.h>
 #include "logging.hpp"
+#include "authorization_header_parser.hpp"
 
 namespace json = nlohmann;
 
@@ -79,29 +80,16 @@ request_handler::auth_result request_handler::authenticate_request(
     // Извлекаем user_id из заголовка Authorization
     auto auth_it = headers.find("authorization");
     if (auth_it != headers.end()) {
-        // Парсим заголовок для извлечения access_key_id
+        // Используем новый парсер для извлечения access_key_id
         std::string auth_header = auth_it->second;
+        auto access_key_id_opt = authorization_header_parser::extract_access_key_id(auth_header);
         
-        // Извлекаем access_key_id из заголовка Authorization
-        // Формат: AWS4-HMAC-SHA256 Credential=AKIA..., ...
-        size_t cred_pos = auth_header.find("Credential=");
-        if (cred_pos != std::string::npos) {
-            size_t start = cred_pos + 11;
-            size_t end = auth_header.find(',', start);
-            if (end == std::string::npos) end = auth_header.length();
-            
-            std::string cred_str = auth_header.substr(start, end - start);
-            size_t slash_pos = cred_str.find('/');
-            
-            if (slash_pos != std::string::npos) {
-                std::string access_key_id = cred_str.substr(0, slash_pos);
-                
-                // Получаем ключ доступа
-                auto access_key_opt = _authenticator->get_key(access_key_id);
-                if (access_key_opt) {
-                    VLOG(2) << "Authenticated with access key: " << access_key_id;
-                    return {true, access_key_id, access_key_opt->user_name};
-                }
+        if (access_key_id_opt) {
+            // Получаем ключ доступа
+            auto access_key_opt = _authenticator->get_key(*access_key_id_opt);
+            if (access_key_opt) {
+                VLOG(2) << "Authenticated with access key: " << *access_key_id_opt;
+                return {true, *access_key_id_opt, access_key_opt->user_name};
             }
         }
     }

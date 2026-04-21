@@ -25,6 +25,7 @@ set(sources
     backend/src/rate_limiter.cpp
     backend/src/path_utils.cpp
     backend/src/config.cpp
+    backend/src/authorization_header_parser.cpp
 )
 
 # Заголовки
@@ -36,6 +37,7 @@ set(headers
     backend/include/authorizer.hpp
     backend/include/rate_limiter.hpp
     backend/include/config.hpp
+    backend/include/authorization_header_parser.hpp
 )
 
 # Executable

@@ -11,11 +11,13 @@ add_executable(unit_tests
     request_handler_test.cpp
     authenticator_test.cpp
     authorizer_test.cpp
+    authorization_header_parser_test.cpp
     ../src/file_manager.cpp
     ../src/request_handler.cpp
     ../src/authenticator.cpp
     ../src/authorizer.cpp
     ../src/path_utils.cpp
+    ../src/authorization_header_parser.cpp
 )
 
 target_link_libraries(unit_tests
@@ -51,6 +53,7 @@ add_executable(integration_tests
     ../src/authorizer.cpp
     ../src/rate_limiter.cpp
     ../src/path_utils.cpp
+    ../src/authorization_header_parser.cpp
 )
 
 target_link_libraries(integration_tests
