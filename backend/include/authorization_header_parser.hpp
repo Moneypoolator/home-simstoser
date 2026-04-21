@@ -48,12 +48,12 @@ public:
     
     /**
      * @brief Check if an Authorization header is in AWS4-HMAC-SHA256 format.
-     * 
+     *
      * @param auth_header The Authorization header value
      * @return true If the header starts with "AWS4-HMAC-SHA256"
      * @return false Otherwise
      */
-    static bool is_aws4_format(const std::string& auth_header);
+    [[nodiscard]] static bool is_aws4_format(const std::string& auth_header);
     
     /**
      * @brief Parse a credential string (access_key_id/credential_scope).

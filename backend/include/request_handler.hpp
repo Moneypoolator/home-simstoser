@@ -224,14 +224,14 @@ private:
     auth_result authenticate_request(const http::request<http::string_body>& req) const;
     
     // === Авторизация: проверка прав доступа ===
-    bool authorize_request(
+    [[nodiscard]] bool authorize_request(
         const std::string& user_id,
         const http::request<http::string_body>& req,
         permission_type required_permission
     ) const;
     
     // === Публичный доступ ===
-    bool check_public_access(
+    [[nodiscard]] bool check_public_access(
         const http::request<http::string_body>& req,
         permission_type required_permission
     ) const;
@@ -268,7 +268,7 @@ private:
     http::response<http::string_body> handle_static_file(const std::string& path);
     // В классе request_handler добавить:
     http::response<http::string_body> handle_index(const http::request<http::string_body>& req);
-    bool is_static_file_request(const std::string& path) const;
+    [[nodiscard]] bool is_static_file_request(const std::string& path) const;
 
     http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
 

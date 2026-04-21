@@ -63,7 +63,7 @@ public:
         int max_age = 86400; // 24 hours in seconds
         
         // Helper method to check if an origin is allowed
-        bool is_origin_allowed(const std::string& origin) const {
+        [[nodiscard]] bool is_origin_allowed(const std::string& origin) const {
             if (allowed_origins.empty()) return false;
             if (allowed_origins.size() == 1 && allowed_origins[0] == "*") return true;
             return std::find(allowed_origins.begin(), allowed_origins.end(), origin) != allowed_origins.end();
@@ -136,8 +136,8 @@ public:
     void run(std::size_t threads = std::thread::hardware_concurrency());
     void stop();
     
-    bool is_ssl_enabled() const { return _ssl_enabled; }
-    bool is_auth_enabled() const { return _auth_enabled; }
+    [[nodiscard]] bool is_ssl_enabled() const { return _ssl_enabled; }
+    [[nodiscard]] bool is_auth_enabled() const { return _auth_enabled; }
     
 private:
     std::string _address;
@@ -179,7 +179,7 @@ private:
     std::shared_ptr<asio::ssl::context> setup_ssl_context();
     
     // Helper methods for keep-alive support
-    bool should_keep_alive(const http::request<http::string_body>& req) const;
+    [[nodiscard]] bool should_keep_alive(const http::request<http::string_body>& req) const;
     void set_keep_alive_headers(http::response<http::string_body>& res, bool keep_alive) const;
     void set_keep_alive_headers(http::response<http::file_body>& res, bool keep_alive) const;
 };

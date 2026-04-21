@@ -85,14 +85,14 @@ public:
     std::optional<user> get_user_by_name(const std::string& username) const;
     
     // Обновить роль пользователя
-    bool update_user_role(const std::string& user_id, user_role new_role);
+    [[nodiscard]] bool update_user_role(const std::string& user_id, user_role new_role);
     
     // Активировать/деактивировать пользователя
-    bool activate_user(const std::string& user_id);
-    bool deactivate_user(const std::string& user_id);
+    [[nodiscard]] bool activate_user(const std::string& user_id);
+    [[nodiscard]] bool deactivate_user(const std::string& user_id);
     
     // Удалить пользователя
-    bool delete_user(const std::string& user_id);
+    [[nodiscard]] bool delete_user(const std::string& user_id);
     
     // Список всех пользователей
     std::vector<user> list_users() const;
@@ -100,10 +100,10 @@ public:
     // === Управление группами ===
     
     // Добавить пользователя в группу
-    bool add_user_to_group(const std::string& user_id, const std::string& group_name);
+    [[nodiscard]] bool add_user_to_group(const std::string& user_id, const std::string& group_name);
     
     // Удалить пользователя из группы
-    bool remove_user_from_group(const std::string& user_id, const std::string& group_name);
+    [[nodiscard]] bool remove_user_from_group(const std::string& user_id, const std::string& group_name);
     
     // Получить список групп пользователя
     std::vector<std::string> get_user_groups(const std::string& user_id) const;
@@ -127,7 +127,7 @@ public:
     std::optional<access_policy> get_policy(const std::string& policy_id) const;
     
     // Удалить политику
-    bool delete_policy(const std::string& policy_id);
+    [[nodiscard]] bool delete_policy(const std::string& policy_id);
     
     // Список всех политик
     std::vector<access_policy> list_policies() const;
@@ -135,7 +135,7 @@ public:
     // === Управление правами доступа к ресурсам (ACL) ===
     
     // Установить права доступа к ресурсу
-    bool set_resource_acl(
+    [[nodiscard]] bool set_resource_acl(
         const std::string& resource_path,
         const resource_acl& acl
     );
@@ -144,37 +144,37 @@ public:
     std::optional<resource_acl> get_resource_acl(const std::string& resource_path) const;
     
     // Удалить права доступа к ресурсу
-    bool remove_resource_acl(const std::string& resource_path);
+    [[nodiscard]] bool remove_resource_acl(const std::string& resource_path);
     
     // Сделать ресурс публичным
-    bool make_resource_public(const std::string& resource_path);
+    [[nodiscard]] bool make_resource_public(const std::string& resource_path);
     
     // Сделать ресурс приватным
-    bool make_resource_private(const std::string& resource_path);
+    [[nodiscard]] bool make_resource_private(const std::string& resource_path);
     
     // Добавить право доступа для пользователя
-    bool add_user_permission(
+    [[nodiscard]] bool add_user_permission(
         const std::string& resource_path,
         const std::string& user_id,
         permission_type perm
     );
     
     // Удалить право доступа для пользователя
-    bool remove_user_permission(
+    [[nodiscard]] bool remove_user_permission(
         const std::string& resource_path,
         const std::string& user_id,
         permission_type perm
     );
     
     // Добавить право доступа для группы
-    bool add_group_permission(
+    [[nodiscard]] bool add_group_permission(
         const std::string& resource_path,
         const std::string& group_name,
         permission_type perm
     );
     
     // Удалить право доступа для группы
-    bool remove_group_permission(
+    [[nodiscard]] bool remove_group_permission(
         const std::string& resource_path,
         const std::string& group_name,
         permission_type perm
@@ -183,23 +183,23 @@ public:
     // === Проверка доступа ===
     
     // Проверить, имеет ли пользователь доступ к ресурсу
-    bool check_access(
+    [[nodiscard]] bool check_access(
         const std::string& user_id,
         const std::string& resource_path,
         permission_type required_permission
     ) const;
     
     // Проверить доступ для анонимного пользователя (публичный доступ)
-    bool check_public_access(
+    [[nodiscard]] bool check_public_access(
         const std::string& resource_path,
         permission_type required_permission
     ) const;
     
     // Проверить, является ли пользователь администратором
-    bool is_admin(const std::string& user_id) const;
+    [[nodiscard]] bool is_admin(const std::string& user_id) const;
     
     // Проверить, является ли пользователь владельцем ресурса
-    bool is_resource_owner(
+    [[nodiscard]] bool is_resource_owner(
         const std::string& user_id,
         const std::string& resource_path
     ) const;
@@ -219,19 +219,19 @@ public:
     static std::string role_to_string(user_role role);
     
     // Проверить соответствие паттерна пути
-    static bool matches_pattern(const std::string& path, const std::string& pattern);
+    [[nodiscard]] static bool matches_pattern(const std::string& path, const std::string& pattern);
 
     // Загрузить пользователей из JSON-файла
-    bool load_users(const std::string& filepath);
+    [[nodiscard]] bool load_users(const std::string& filepath);
     
     // Сохранить пользователей в JSON-файл
-    bool save_users(const std::string& filepath) const;
+    [[nodiscard]] bool save_users(const std::string& filepath) const;
     
     // Загрузить ACL из JSON-файла
-    bool load_acls(const std::string& filepath);
+    [[nodiscard]] bool load_acls(const std::string& filepath);
     
     // Сохранить ACL в JSON-файл
-    bool save_acls(const std::string& filepath) const;
+    [[nodiscard]] bool save_acls(const std::string& filepath) const;
     
 private:
     mutable std::recursive_mutex _mutex;
@@ -247,7 +247,7 @@ private:
     std::set<permission_type> get_permissions_for_role(user_role role) const;
     
     // Проверка прав на основе политик
-    bool check_policy_permissions(
+    [[nodiscard]] bool check_policy_permissions(
         const std::string& user_id,
         const std::string& resource_path,
         permission_type required_permission

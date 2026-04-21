@@ -26,10 +26,10 @@ public:
     ~authenticator() = default;
     
     // Загрузить ключи доступа из файла
-    bool load_keys(const std::string& filepath);
+    [[nodiscard]] bool load_keys(const std::string& filepath);
     
     // Сохранить ключи доступа в файл
-    bool save_keys(const std::string& filepath) const;
+    [[nodiscard]] bool save_keys(const std::string& filepath) const;
     
     // Создать новый ключ доступа
     std::optional<access_key> create_access_key(
@@ -38,16 +38,16 @@ public:
     );
     
     // Удалить ключ доступа
-    bool delete_access_key(const std::string& access_key_id);
+    [[nodiscard]] bool delete_access_key(const std::string& access_key_id);
     
     // Деактивировать ключ доступа
-    bool deactivate_key(const std::string& access_key_id);
+    [[nodiscard]] bool deactivate_key(const std::string& access_key_id);
     
     // Активировать ключ доступа
-    bool activate_key(const std::string& access_key_id);
+    [[nodiscard]] bool activate_key(const std::string& access_key_id);
     
     // Проверить подпись запроса (AWS Signature Version 4)
-    bool verify_signature(
+    [[nodiscard]] bool verify_signature(
         const std::string& method,
         const std::string& uri,
         const std::map<std::string, std::string>& headers,
@@ -114,5 +114,5 @@ public:
         std::optional<std::string> get_timestamp(const std::map<std::string, std::string>& headers) const;
 
         // Проверка временной метки (защита от replay атак)
-        bool is_timestamp_valid(const std::string& timestamp_str) const;
+        [[nodiscard]] bool is_timestamp_valid(const std::string& timestamp_str) const;
     };

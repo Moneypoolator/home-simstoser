@@ -48,13 +48,13 @@ public:
 
     /**
      * @brief Insert or update a key with given value.
-     * 
-     * @param key 
-     * @param value 
+     *
+     * @param key
+     * @param value
      * @param ttl Optional TTL (if not provided, uses default)
      * @return true if inserted, false if error (e.g., value size exceeds max size)
      */
-    bool put(const KeyType& key, const ValueType& value, 
+    [[nodiscard]] bool put(const KeyType& key, const ValueType& value,
              std::chrono::seconds ttl = std::chrono::seconds(0)) {
         std::lock_guard<std::mutex> lock(_mutex);
         
@@ -130,12 +130,12 @@ public:
 
     /**
      * @brief Check if key exists (and not expired).
-     * 
-     * @param key 
-     * @return true 
-     * @return false 
+     *
+     * @param key
+     * @return true
+     * @return false
      */
-    bool contains(const KeyType& key) {
+    [[nodiscard]] bool contains(const KeyType& key) {
         std::lock_guard<std::mutex> lock(_mutex);
         auto it = _map.find(key);
         if (it == _map.end()) return false;
@@ -155,11 +155,11 @@ public:
 
     /**
      * @brief Remove entry for key.
-     * 
-     * @param key 
+     *
+     * @param key
      * @return true if removed, false if not found
      */
-    bool erase(const KeyType& key) {
+    [[nodiscard]] bool erase(const KeyType& key) {
         std::lock_guard<std::mutex> lock(_mutex);
         auto it = _map.find(key);
         if (it == _map.end()) return false;

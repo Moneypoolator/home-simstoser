@@ -14,9 +14,9 @@ namespace path_utils {
 //   - не является абсолютным
 //   - канонический путь (с учётом символьных ссылок) лежит внутри base_dir
 //   - не является символьной ссылкой, ведущей за пределы base_dir
-bool is_path_safe(const fs::path& base_dir, const std::string& path);
+[[nodiscard]] bool is_path_safe(const fs::path& base_dir, const std::string& path);
 
 // Перегрузка для fs::path
-bool is_path_safe(const fs::path& base_dir, const fs::path& path);
+[[nodiscard]] bool is_path_safe(const fs::path& base_dir, const fs::path& path);
 
 } // namespace path_utils

@@ -39,10 +39,10 @@ public:
     rate_limiter(const rate_limiter_config& cfg = rate_limiter_config());
     
     // Check if IP is allowed to make a request
-    bool allow_request(const std::string& ip_address);
+    [[nodiscard]] bool allow_request(const std::string& ip_address);
     
     // Check if IP is allowed to establish a new connection
-    bool allow_connection(const std::string& ip_address);
+    [[nodiscard]] bool allow_connection(const std::string& ip_address);
     
     // Record a completed request
     void record_request(const std::string& ip_address, size_t request_size = 0);
@@ -54,7 +54,7 @@ public:
     void record_disconnection(const std::string& ip_address);
     
     // Check request size limit
-    bool check_request_size(const std::string& ip_address, size_t request_size);
+    [[nodiscard]] bool check_request_size(const std::string& ip_address, size_t request_size);
     
     // Get current statistics for an IP
     struct ip_stats {
@@ -104,7 +104,7 @@ private:
     void cleanup_old_requests(ip_data& data);
     void cleanup_old_connections(ip_data& data);
     void cleanup_old_ddos_entries(ip_data& data);
-    bool check_ddos_attack(const std::string& ip_address, ip_data& data);
+    [[nodiscard]] bool check_ddos_attack(const std::string& ip_address, ip_data& data);
     
     // Time utilities
     std::chrono::system_clock::time_point now() const {
@@ -112,7 +112,7 @@ private:
     }
     
     template<typename Duration>
-    bool is_expired(const std::chrono::system_clock::time_point& timestamp, Duration max_age) const {
+    [[nodiscard]] bool is_expired(const std::chrono::system_clock::time_point& timestamp, Duration max_age) const {
         return now() - timestamp > max_age;
     }
 };
