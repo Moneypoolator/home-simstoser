@@ -38,10 +38,11 @@ request_handler::request_handler(
     : _file_manager(file_manager)
     , _authenticator(auth)
     , _authorizer(authorizer)
+    , _compression_config() // default initialized
 {
-    VLOG(1) << "Request handler initialized (auth: " 
-            << (_authenticator ? "enabled" : "disabled") 
-            << ", authorization: " 
+    VLOG(1) << "Request handler initialized (auth: "
+            << (_authenticator ? "enabled" : "disabled")
+            << ", authorization: "
             << (_authorizer ? "enabled" : "disabled") << ")";
 }
 
@@ -1360,3 +1361,84 @@ std::optional<int> request_handler::get_query_param_int(const std::string& query
         return std::nullopt;
     }
 }
+
+// ========== СЖАТИЕ ==========
+
+template<class Body>
+void request_handler::apply_compression_if_needed(
+    http::response<Body>& response,
+    const http::request<http::string_body>& req
+) const {
+    // Skip if compression disabled
+    if (!_compression_config.enabled) {
+        return;
+    }
+    
+    // Get Accept-Encoding header
+    auto accept_encoding_it = req.find(http::field::accept_encoding);
+    if (accept_encoding_it == req.end()) {
+        VLOG(3) << "No Accept-Encoding header, skipping compression";
+        return;
+    }
+    
+    std::string accept_encoding = std::string(accept_encoding_it->value());
+    VLOG(3) << "Accept-Encoding: " << accept_encoding;
+    
+    // Select best compression algorithm
+    auto algo_opt = compression::select_algorithm(accept_encoding, _compression_config);
+    if (!algo_opt) {
+        VLOG(3) << "No suitable compression algorithm found";
+        return;
+    }
+    
+    // Check if content type should be compressed
+    auto content_type_it = response.find(http::field::content_type);
+    std::string content_type = content_type_it != response.end()
+        ? std::string(content_type_it->value())
+        : "application/octet-stream";
+    
+    if (!compression::should_compress_content(content_type, _compression_config)) {
+        VLOG(3) << "Content type not compressible: " << content_type;
+        return;
+    }
+    
+    // Check if we should compress based on response type
+    // Determine if this is a static file, API response, or file download
+    // For simplicity, we'll compress all compressible content for now
+    // but could be refined based on path or other criteria
+    
+    // Get response body
+    std::string body = response.body();
+    if (body.empty()) {
+        VLOG(3) << "Empty body, skipping compression";
+        return;
+    }
+    
+    // Check size limits
+    if (body.size() < _compression_config.min_size || body.size() > _compression_config.max_size) {
+        VLOG(3) << "Body size " << body.size() << " outside compression limits ["
+                << _compression_config.min_size << ", " << _compression_config.max_size << "]";
+        return;
+    }
+    
+    // Compress the body
+    auto compressed = compression::compress(body, *algo_opt, _compression_config);
+    if (compressed.empty()) {
+        VLOG(2) << "Compression failed or not applied for algorithm " << static_cast<int>(*algo_opt);
+        return;
+    }
+    
+    // Update response
+    response.body() = std::string(compressed.begin(), compressed.end());
+    response.set(http::field::content_encoding, compression::content_encoding_header(*algo_opt));
+    response.set(http::field::content_length, std::to_string(compressed.size()));
+    
+    VLOG(2) << "Compressed response from " << body.size() << " to " << compressed.size()
+            << " bytes using " << compression::content_encoding_header(*algo_opt);
+}
+
+// Explicit template instantiation for the types we use
+template void request_handler::apply_compression_if_needed<http::string_body>(
+    http::response<http::string_body>& response,
+    const http::request<http::string_body>& req
+) const;

@@ -7,6 +7,7 @@
 
 #include "server.hpp"
 #include "rate_limiter.hpp"
+#include "compression.hpp"
 
 struct server_config {
     // Server basic settings
@@ -39,6 +40,9 @@ struct server_config {
     // Cache configuration
     cache_config cache;
     
+    // Compression configuration
+    compression::compression_config compression;
+    
     // Logging configuration
     struct logging_config {
         int log_level = 0; // glog v level
@@ -66,6 +70,9 @@ void to_json(nlohmann::json& j, const upload_limits_config& cfg);
 void from_json(const nlohmann::json& j, keep_alive_config& cfg);
 void to_json(nlohmann::json& j, const keep_alive_config& cfg);
 
+void from_json(const nlohmann::json& j, cache_config& cfg);
+void to_json(nlohmann::json& j, const cache_config& cfg);
+
 void from_json(const nlohmann::json& j, s3_server::ssl_config& cfg);
 void to_json(nlohmann::json& j, const s3_server::ssl_config& cfg);
 
@@ -77,3 +84,6 @@ void to_json(nlohmann::json& j, const rate_limiter_config& cfg);
 
 void from_json(const nlohmann::json& j, server_config::logging_config& cfg);
 void to_json(nlohmann::json& j, const server_config::logging_config& cfg);
+
+void from_json(const nlohmann::json& j, compression::compression_config& cfg);
+void to_json(nlohmann::json& j, const compression::compression_config& cfg);

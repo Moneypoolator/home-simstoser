@@ -12,6 +12,7 @@
 #include "authorizer.hpp"
 #include "server.hpp"  // for cors_config
 #include "logging.hpp"
+#include "compression.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -56,6 +57,7 @@ public:
             response.result(http::status::ok);
             response.set(http::field::content_type, "text/plain");
             response.body() = "OK";
+            apply_compression_if_needed(response, req);
             response.prepare_payload();
             send(std::move(response));
             return;
@@ -74,6 +76,7 @@ public:
         if (is_static_file_request(path)) {
             response = handle_static_file(path);
             apply_cors_headers(response, req);
+            apply_compression_if_needed(response, req);
             response.prepare_payload();
             send(std::move(response));
             return;
@@ -122,6 +125,7 @@ public:
         }
         
         if (!access_granted) {
+            apply_compression_if_needed(response, req);
             response.prepare_payload();
             send(std::move(response));
             return;
@@ -178,6 +182,7 @@ public:
         }
         
         apply_cors_headers(response, req);
+        apply_compression_if_needed(response, req);
         response.prepare_payload();
         send(std::move(response));
     }
@@ -188,6 +193,9 @@ public:
     
     // Настройка CORS
     void set_cors_config(const std::optional<s3_server::cors_config>& config) { _cors_config = config; }
+    
+    // Настройка сжатия
+    void set_compression_config(const compression::compression_config& config) { _compression_config = config; }
     
     http::response<http::string_body> handle_get(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_put(const http::request<http::string_body>& req);
@@ -213,6 +221,7 @@ private:
     bool _auth_enabled = false;
     bool _authorization_enabled = false;
     std::optional<s3_server::cors_config> _cors_config;
+    compression::compression_config _compression_config;
     
     // === Аутентификация: проверка подписи запроса ===
     struct auth_result {
@@ -290,6 +299,13 @@ private:
     // Возвращает пару (start, end) или std::nullopt если заголовок отсутствует или некорректен
     std::optional<std::pair<size_t, size_t>> parse_range_header(const http::request<http::string_body>& req, size_t file_size) const;
 
+    // Применение сжатия к ответу (если поддерживается клиентом и конфигурацией)
+    template<class Body>
+    void apply_compression_if_needed(
+        http::response<Body>& response,
+        const http::request<http::string_body>& req
+    ) const;
+    
     // Установка заголовка Accept-Ranges в ответ
     template<class Body>
     void set_accept_ranges_header(http::response<Body>& response) const;

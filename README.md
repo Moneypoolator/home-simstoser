@@ -20,6 +20,7 @@ Home S3 Storage is a self-hosted file storage solution that implements basic Ama
 - **File Preview**: Built-in preview for common file types (images, PDFs, text files)
 - **SSL/TLS Support**: Secure HTTPS connections with configurable certificates
 - **Object Metadata**: Custom metadata support via `x-amz-meta-*` headers (S3 compatible)
+- **HTTP Compression**: Automatic gzip/brotli compression for responses with configurable size limits and content type filtering
 
 ### Architecture
 
@@ -52,6 +53,8 @@ The application consists of several core components:
 - OpenSSL 3.0+
 - nlohmann/json library
 - Google Logging (glog)
+- ZLIB (for gzip compression) – typically provided by system
+- Brotli (optional, for brotli compression) – can be installed via package manager
 
 **Frontend (Web UI):**
 
@@ -66,19 +69,19 @@ The application consists of several core components:
 
    ```bash
    sudo apt update
-   sudo apt install -y build-essential cmake libboost-system-dev libssl-dev nlohmann-json3-dev libgoogle-glog-dev
+   sudo apt install -y build-essential cmake libboost-system-dev libssl-dev nlohmann-json3-dev libgoogle-glog-dev zlib1g-dev libbrotli-dev
    ```
 
    **Fedora/RHEL:**
 
    ```bash
-   sudo dnf install -y gcc-c++ cmake boost-devel openssl-devel nlohmann-json-devel glog-devel
+   sudo dnf install -y gcc-c++ cmake boost-devel openssl-devel nlohmann-json-devel glog-devel zlib-devel brotli-devel
    ```
 
    **macOS (Homebrew):**
 
    ```bash
-   brew install cmake boost openssl nlohmann-json glog
+   brew install cmake boost openssl nlohmann-json glog brotli
    ```
 
 2. **Install Node.js and npm**
@@ -227,8 +230,62 @@ The configuration file includes the following sections:
 - **Keep‑alive settings** (`keep_alive`) – connection reuse parameters
 - **Rate limiting** (`rate_limiter`) – request/connection limits and DDoS protection
 - **Logging** (`logging`) – log level and directory
+- **Compression** (`compression`) – HTTP response compression (gzip/brotli) with size limits and content type filtering
 
 All fields are optional; missing fields use the built‑in defaults.
+
+#### Compression Configuration
+
+The server supports automatic HTTP response compression using gzip and brotli algorithms. Compression reduces bandwidth usage and improves transfer speeds for text-based content (HTML, JSON, CSS, JavaScript, XML, etc.).
+
+**Configuration options** (in `compression` section of config.json):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable/disable compression globally |
+| `min_size` | integer | `1024` | Minimum response size (bytes) to compress (smaller responses are not compressed) |
+| `max_size` | integer | `10485760` | Maximum response size (bytes) to compress (larger responses are not compressed) |
+| `supported_algorithms` | array of strings | `["gzip", "brotli"]` | List of compression algorithms to offer (gzip, brotli) |
+| `gzip_level` | integer (1-9) | `6` | Compression level for gzip (1=fastest, 9=best compression) |
+| `brotli_quality` | integer (0-11) | `4` | Quality level for brotli (0=fastest, 11=best compression) |
+| `compress_flags` | integer | `0` | Additional flags for compression (reserved for future use) |
+
+**How it works:**
+
+1. The server checks the `Accept-Encoding` request header to determine which algorithms the client supports.
+2. If compression is enabled and the response size is within configured limits, the server selects the best available algorithm (preferring brotli over gzip).
+3. The response body is compressed and the `Content-Encoding` header is set accordingly.
+4. Compression is automatically skipped for:
+   - Already compressed content (images, videos, archives, etc.)
+   - Responses with `Content-Encoding` already set
+   - CORS preflight requests (`OPTIONS`)
+   - Error responses smaller than `min_size`
+
+**Example configuration:**
+
+```json
+"compression": {
+  "enabled": true,
+  "min_size": 1024,
+  "max_size": 10485760,
+  "supported_algorithms": ["gzip", "brotli"],
+  "gzip_level": 6,
+  "brotli_quality": 4,
+  "compress_flags": 0
+}
+```
+
+**Testing compression:**
+
+Use `curl` with the `--compressed` flag or explicitly set `Accept-Encoding` header:
+
+```bash
+# Request with compression support
+curl -H "Accept-Encoding: gzip, br" http://localhost:9000/list
+
+# Or use curl's built-in decompression
+curl --compressed http://localhost:9000/list
+```
 
 #### Example Usage
 
@@ -501,7 +558,7 @@ mc mirror ./local-folder/ local/
 - [ ] Server-side encryption
 - [x] CORS configuration
 - [x] Metadata support for objects
-- [ ] Compression (gzip/brotli) for transfers
+- [x] Compression (gzip/brotli) for transfers
 - [x] Cache layer for frequently accessed files
 - [x] Connection pooling and keep-alive optimization
 

@@ -5,6 +5,62 @@
 
 namespace fs = std::filesystem;
 
+namespace compression {
+
+// compression_config
+void from_json(const nlohmann::json& j, compression_config& cfg) {
+    if (j.contains("enabled")) j.at("enabled").get_to(cfg.enabled);
+    if (j.contains("min_size")) j.at("min_size").get_to(cfg.min_size);
+    if (j.contains("max_size")) j.at("max_size").get_to(cfg.max_size);
+    
+    if (j.contains("supported_algorithms")) {
+        cfg.supported_algorithms.clear();
+        auto algos = j.at("supported_algorithms").get<std::vector<std::string>>();
+        for (const auto& algo_str : algos) {
+            if (algo_str == "gzip" || algo_str == "GZIP") {
+                cfg.supported_algorithms.push_back(algorithm::GZIP);
+            } else if (algo_str == "brotli" || algo_str == "br" || algo_str == "BROTLI") {
+                cfg.supported_algorithms.push_back(algorithm::BROTLI);
+            }
+        }
+    }
+    
+    if (j.contains("gzip_level")) j.at("gzip_level").get_to(cfg.gzip_level);
+    if (j.contains("brotli_quality")) j.at("brotli_quality").get_to(cfg.brotli_quality);
+    if (j.contains("compress_static")) j.at("compress_static").get_to(cfg.compress_static);
+    if (j.contains("compress_api")) j.at("compress_api").get_to(cfg.compress_api);
+    if (j.contains("compress_files")) j.at("compress_files").get_to(cfg.compress_files);
+}
+
+void to_json(nlohmann::json& j, const compression_config& cfg) {
+    j["enabled"] = cfg.enabled;
+    j["min_size"] = cfg.min_size;
+    j["max_size"] = cfg.max_size;
+    
+    std::vector<std::string> algo_strings;
+    for (const auto& algo : cfg.supported_algorithms) {
+        switch (algo) {
+            case algorithm::GZIP:
+                algo_strings.push_back("gzip");
+                break;
+            case algorithm::BROTLI:
+                algo_strings.push_back("brotli");
+                break;
+            default:
+                break;
+        }
+    }
+    j["supported_algorithms"] = algo_strings;
+    
+    j["gzip_level"] = cfg.gzip_level;
+    j["brotli_quality"] = cfg.brotli_quality;
+    j["compress_static"] = cfg.compress_static;
+    j["compress_api"] = cfg.compress_api;
+    j["compress_files"] = cfg.compress_files;
+}
+
+} // namespace compression
+
 // server_config static methods
 server_config server_config::from_json(const nlohmann::json& j) {
     return j.get<server_config>();
@@ -70,9 +126,19 @@ void from_json(const nlohmann::json& j, server_config& cfg) {
         j.at("rate_limiter").get_to(cfg.rate_limiter);
     }
     
+    // Cache
+    if (j.contains("cache")) {
+        j.at("cache").get_to(cfg.cache);
+    }
+    
     // Logging
     if (j.contains("logging")) {
         j.at("logging").get_to(cfg.logging);
+    }
+    
+    // Compression
+    if (j.contains("compression")) {
+        j.at("compression").get_to(cfg.compression);
     }
 }
 

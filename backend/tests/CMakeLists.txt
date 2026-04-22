@@ -18,9 +18,10 @@ add_executable(unit_tests
     ../src/authorizer.cpp
     ../src/path_utils.cpp
     ../src/authorization_header_parser.cpp
+    ../src/compression.cpp
 )
 
-target_link_libraries(unit_tests
+target_link_libraries(unit_tests PRIVATE
     GTest::gtest
     GTest::gtest_main
     Boost::system
@@ -30,6 +31,11 @@ target_link_libraries(unit_tests
     Threads::Threads
     nlohmann_json::nlohmann_json
 )
+
+if(ZLIB_FOUND)
+    target_link_libraries(unit_tests PRIVATE ZLIB::ZLIB)
+    target_compile_definitions(unit_tests PRIVATE HAVE_ZLIB=1)
+endif()
 
 # Prevent linker from discarding test registration symbols
 target_link_options(unit_tests PRIVATE -Wl,--no-gc-sections)
@@ -54,9 +60,10 @@ add_executable(integration_tests
     ../src/rate_limiter.cpp
     ../src/path_utils.cpp
     ../src/authorization_header_parser.cpp
+    ../src/compression.cpp
 )
 
-target_link_libraries(integration_tests
+target_link_libraries(integration_tests PRIVATE
     GTest::gtest
     GTest::gtest_main
     Boost::system
@@ -66,6 +73,11 @@ target_link_libraries(integration_tests
     Threads::Threads
     nlohmann_json::nlohmann_json
 )
+
+if(ZLIB_FOUND)
+    target_link_libraries(integration_tests PRIVATE ZLIB::ZLIB)
+    target_compile_definitions(integration_tests PRIVATE HAVE_ZLIB=1)
+endif()
 
 # Проверка поддержки filesystem (повторяем логику из корневого CMakeLists.txt)
 include(CheckIncludeFileCXX)
