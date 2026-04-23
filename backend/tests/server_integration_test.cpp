@@ -775,7 +775,7 @@ protected:
         // В production этого избегаем, но для тестов допустимо
         std::string cmd = "openssl req -x509 -newkey rsa:2048 -keyout " + key_path +
                           " -out " + cert_path + " -days 1 -nodes -subj \"/CN=localhost\" 2>/dev/null";
-        std::system(cmd.c_str());
+        [[maybe_unused]] int result = std::system(cmd.c_str());
     }
     
     http_response send_https_request(

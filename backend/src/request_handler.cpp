@@ -5,7 +5,6 @@
 #include <fstream>
 #include <sstream>
 #include <glog/logging.h>
-#include "logging.hpp"
 #include "authorization_header_parser.hpp"
 
 namespace json = nlohmann;
@@ -603,7 +602,7 @@ http::response<http::string_body> request_handler::handle_put(const http::reques
         }
     }
     if (!custom_metadata.empty()) {
-        _file_manager.set_custom_metadata(filename, custom_metadata);
+        (void)_file_manager.set_custom_metadata(filename, custom_metadata);
     }
     
     auto metadata = _file_manager.get_metadata(filename);

@@ -78,9 +78,9 @@ TEST_F(RequestHandlerTest, HandleListEmpty) {
 
 TEST_F(RequestHandlerTest, HandleListWithFiles) {
     // Загружаем несколько файлов
-    _file_manager->upload_file("file1.txt", std::vector<char>{'1'});
-    _file_manager->upload_file("file2.txt", std::vector<char>{'2'});
-    _file_manager->upload_file("subdir/file3.txt", std::vector<char>{'3'});
+    EXPECT_TRUE(_file_manager->upload_file("file1.txt", std::vector<char>{'1'}));
+    EXPECT_TRUE(_file_manager->upload_file("file2.txt", std::vector<char>{'2'}));
+    EXPECT_TRUE(_file_manager->upload_file("subdir/file3.txt", std::vector<char>{'3'}));
     
     http::request<http::string_body> req{http::verb::get, "/list", 11};
     
@@ -107,7 +107,7 @@ TEST_F(RequestHandlerTest, HandleGetFileNotFound) {
 TEST_F(RequestHandlerTest, HandleGetFileExists) {
     // Загружаем файл
     std::vector<char> content = {'T', 'e', 's', 't', ' ', 'c', 'o', 'n', 't', 'e', 'n', 't'};
-    _file_manager->upload_file("test.txt", content);
+    EXPECT_TRUE(_file_manager->upload_file("test.txt", content));
     
     http::request<http::string_body> req{http::verb::get, "/test.txt", 11};
     
@@ -164,7 +164,7 @@ TEST_F(RequestHandlerTest, HandleDeleteFileNotFound) {
 
 TEST_F(RequestHandlerTest, HandleDeleteFileExists) {
     // Загружаем файл
-    _file_manager->upload_file("todelete.txt", std::vector<char>{'D'});
+    EXPECT_TRUE(_file_manager->upload_file("todelete.txt", std::vector<char>{'D'}));
     
     http::request<http::string_body> req{http::verb::delete_, "/todelete.txt", 11};
     
@@ -247,7 +247,7 @@ TEST_F(RequestHandlerTest, HandleUploadPartTooLarge) {
     http::response<http::string_body> response = handler_small.handle_upload_part(req);
     EXPECT_EQ(response.result(), http::status::internal_server_error);
     
-    fm_small.abort_multipart_upload(*upload_id);
+    EXPECT_TRUE(fm_small.abort_multipart_upload(*upload_id));
 }
 
 TEST_F(RequestHandlerTest, HandleGetWithRangeHeader) {
@@ -256,7 +256,7 @@ TEST_F(RequestHandlerTest, HandleGetWithRangeHeader) {
     for (size_t i = 0; i < data.size(); ++i) {
         data[i] = static_cast<char>(i % 256);
     }
-    _file_manager->upload_file("range_test.bin", data);
+    EXPECT_TRUE(_file_manager->upload_file("range_test.bin", data));
     
     // Request with Range: bytes=0-1023
     http::request<http::string_body> req{http::verb::get, "/range_test.bin", 11};
@@ -279,7 +279,7 @@ TEST_F(RequestHandlerTest, HandleGetWithRangeHeader) {
 TEST_F(RequestHandlerTest, HandleGetWithRangeHeaderOutOfBounds) {
     // Upload a test file
     std::vector<char> data(100);
-    _file_manager->upload_file("small.bin", data);
+    EXPECT_TRUE(_file_manager->upload_file("small.bin", data));
     
     // Range beyond file size
     http::request<http::string_body> req{http::verb::get, "/small.bin", 11};
@@ -294,7 +294,7 @@ TEST_F(RequestHandlerTest, HandleGetWithRangeHeaderOutOfBounds) {
 
 TEST_F(RequestHandlerTest, HandleGetWithInvalidRangeHeader) {
     std::vector<char> data(100);
-    _file_manager->upload_file("test.bin", data);
+    EXPECT_TRUE(_file_manager->upload_file("test.bin", data));
     
     // Invalid range format
     http::request<http::string_body> req{http::verb::get, "/test.bin", 11};
@@ -309,7 +309,7 @@ TEST_F(RequestHandlerTest, HandleGetWithInvalidRangeHeader) {
 
 TEST_F(RequestHandlerTest, HandleGetWithSuffixRangeNotSupported) {
     std::vector<char> data(100);
-    _file_manager->upload_file("test.bin", data);
+    EXPECT_TRUE(_file_manager->upload_file("test.bin", data));
     
     // Suffix range (last N bytes) not implemented
     http::request<http::string_body> req{http::verb::get, "/test.bin", 11};
@@ -324,7 +324,7 @@ TEST_F(RequestHandlerTest, HandleGetWithSuffixRangeNotSupported) {
 
 TEST_F(RequestHandlerTest, HandleGetWithoutRangeHeader) {
     std::vector<char> data(500);
-    _file_manager->upload_file("full.bin", data);
+    EXPECT_TRUE(_file_manager->upload_file("full.bin", data));
     
     http::request<http::string_body> req{http::verb::get, "/full.bin", 11};
     // No range header
@@ -377,10 +377,10 @@ protected:
         _file_manager = std::make_unique<file_manager>(_temp_dir.string());
         
         _authenticator = std::make_shared<authenticator>();
-        _authenticator->load_keys(_keys_file.string());
+        EXPECT_TRUE(_authenticator->load_keys(_keys_file.string()));
         
         _authorizer = std::make_shared<authorizer>();
-        _authorizer->load_users(_users_file.string());
+        EXPECT_TRUE(_authorizer->load_users(_users_file.string()));
         
         _handler = std::make_unique<request_handler>(*_file_manager, _authenticator, _authorizer);
         _handler->set_auth_enabled(true);
@@ -527,8 +527,8 @@ TEST_F(RequestHandlerTest, HandleCompleteUpload_Success) {
     // Загружаем две части
     std::vector<char> part1 = {'A', 'B', 'C'};
     std::vector<char> part2 = {'D', 'E', 'F'};
-    _file_manager->upload_part(upload_id, 1, part1);
-    _file_manager->upload_part(upload_id, 2, part2);
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, part1));
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 2, part2));
     
     std::string target = "/upload/complete?upload_id=" + upload_id;
     http::request<http::string_body> req{http::verb::post, target, 11};
@@ -587,7 +587,7 @@ TEST_F(RequestHandlerTest, HandleGetProgress_Success) {
     std::string upload_id = *upload_id_opt;
     
     std::vector<char> part1(100, 'X');
-    _file_manager->upload_part(upload_id, 1, part1);
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, part1));
     
     std::string target = "/upload/progress?upload_id=" + upload_id;
     http::request<http::string_body> req{http::verb::get, target, 11};
@@ -771,7 +771,7 @@ TEST_F(RequestHandlerAuthTest, AuthorizeRequest_AdminHasAccess) {
 
 TEST_F(RequestHandlerAuthTest, CheckPublicAccess) {
     // Устанавливаем публичный доступ на ресурс
-    _authorizer->make_resource_public("public.txt");
+    EXPECT_TRUE(_authorizer->make_resource_public("public.txt"));
     
     http::request<http::string_body> req{http::verb::get, "/public.txt", 11};
     bool public_access = _handler->check_public_access(req, permission_type::READ);
@@ -846,7 +846,7 @@ TEST_F(RequestHandlerTest, UrlDecode) {
 
 TEST_F(RequestHandlerAuthTest, FullRequest_AuthenticatedAuthorized) {
     // Загружаем файл для чтения
-    _file_manager->upload_file("test.txt", std::vector<char>{'c', 'o', 'n', 't', 'e', 'n', 't'});
+    EXPECT_TRUE(_file_manager->upload_file("test.txt", std::vector<char>{'c', 'o', 'n', 't', 'e', 'n', 't'}));
     
     // Создаём подписанный запрос
     auto req = create_signed_request(http::verb::get, "/test.txt");

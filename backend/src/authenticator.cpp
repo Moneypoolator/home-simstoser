@@ -402,6 +402,7 @@ std::string authenticator::generate_signature(
     const std::string& region,
     const std::string& service) const
 {
+    (void)access_key_id;
     // 1. Extract timestamp from headers (x-amz-date or date)
     auto timestamp_opt = get_timestamp(headers);
     if (!timestamp_opt) {

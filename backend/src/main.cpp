@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <ctime>
 #include <cstdio>
-#include <algorithm>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
@@ -292,6 +291,7 @@ int main(int argc, char* argv[])
     std::string acls_file = cfg.acls_file;
     bool enable_auth = cfg.enable_auth;
     bool enable_ssl = cfg.enable_ssl;
+    (void)enable_ssl;
     
     bool use_ssl = cfg.enable_ssl;
     bool use_letsencrypt = cfg.use_letsencrypt;
@@ -309,6 +309,7 @@ int main(int argc, char* argv[])
     int cors_max_age = cfg.cors_cfg.has_value() ? cfg.cors_cfg->max_age : 86400;
 
     upload_limits_config default_limits = cfg.upload_limits;
+    (void)default_limits;
 
     // Парсинг аргументов командной строки
     for (int i = 1; i < argc; ++i) {

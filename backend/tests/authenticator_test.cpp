@@ -290,7 +290,7 @@ TEST_F(AuthenticatorTest, VerifySignatureInactiveKey) {
     authenticator auth;
     auto key = auth.create_access_key("user");
     ASSERT_TRUE(key.has_value());
-    auth.deactivate_key(key->access_key_id);
+    EXPECT_TRUE(auth.deactivate_key(key->access_key_id));
     
     std::map<std::string, std::string> headers = {
         {"authorization", "AWS4-HMAC-SHA256 Credential=" + key->access_key_id + "/20220101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=abcdef"},
@@ -677,7 +677,7 @@ TEST_F(AuthenticatorTest, ConcurrentAccess) {
             
             // Иногда деактивируем ключ
             if (i % 15 == 0 && !key_ids.empty()) {
-                auth.deactivate_key(key_ids[idx]);
+                (void)auth.deactivate_key(key_ids[idx]);
             }
         }
     };

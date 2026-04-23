@@ -1,10 +1,8 @@
 #include <gtest/gtest.h>
 #include "file_manager.hpp"
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <thread>
-#include <functional>
 #include <chrono>
 
 #include <random>
@@ -57,7 +55,7 @@ TEST_F(FileManagerTest, FileExistsAfterUpload) {
     std::vector<char> data = {'T', 'e', 's', 't'};
     
     // Act
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     bool exists = _file_manager->file_exists(filename);
     
     // Assert
@@ -76,7 +74,7 @@ TEST_F(FileManagerTest, DeleteFile) {
     // Arrange
     std::string filename = "todelete.txt";
     std::vector<char> data = {'D', 'e', 'l', 'e', 't', 'e'};
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Act
     bool deleted = _file_manager->delete_file(filename);
@@ -91,7 +89,7 @@ TEST_F(FileManagerTest, GetMetadata) {
     // Arrange
     std::string filename = "metadata.txt";
     std::vector<char> data = {'M', 'e', 't', 'a'};
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Act
     auto metadata = _file_manager->get_metadata(filename);
@@ -107,7 +105,7 @@ TEST_F(FileManagerTest, CustomMetadata) {
     // Arrange
     std::string filename = "custom_meta.txt";
     std::vector<char> data = {'d', 'a', 't', 'a'};
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     std::map<std::string, std::string> meta = {
         {"author", "testuser"},
@@ -148,9 +146,9 @@ TEST_F(FileManagerTest, ListFilesEmpty) {
 
 TEST_F(FileManagerTest, ListFilesWithContent) {
     // Arrange
-    _file_manager->upload_file("file1.txt", std::vector<char>{'1'});
-    _file_manager->upload_file("file2.txt", std::vector<char>{'2', '2'});
-    _file_manager->upload_file("subdir/file3.txt", std::vector<char>{'3', '3', '3'});
+    EXPECT_TRUE(_file_manager->upload_file("file1.txt", std::vector<char>{'1'}));
+    EXPECT_TRUE(_file_manager->upload_file("file2.txt", std::vector<char>{'2', '2'}));
+    EXPECT_TRUE(_file_manager->upload_file("subdir/file3.txt", std::vector<char>{'3', '3', '3'}));
     
     // Act
     auto files = _file_manager->list_files();
@@ -186,7 +184,7 @@ TEST_F(FileManagerTest, ETagConsistency) {
     std::vector<char> data = {'S', 'a', 'm', 'e', ' ', 'c', 'o', 'n', 't', 'e', 'n', 't'};
     
     // Act
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     auto metadata1 = _file_manager->get_metadata(filename);
     auto metadata2 = _file_manager->get_metadata(filename);
     
@@ -202,8 +200,8 @@ TEST_F(FileManagerTest, ETagDifferentContent) {
     std::vector<char> data2 = {'C', 'o', 'n', 't', 'e', 'n', 't', '2'};
     
     // Act
-    _file_manager->upload_file("file1.txt", data1);
-    _file_manager->upload_file("file2.txt", data2);
+    EXPECT_TRUE(_file_manager->upload_file("file1.txt", data1));
+    EXPECT_TRUE(_file_manager->upload_file("file2.txt", data2));
     
     auto metadata1 = _file_manager->get_metadata("file1.txt");
     auto metadata2 = _file_manager->get_metadata("file2.txt");
@@ -507,7 +505,7 @@ TEST_F(FileManagerTest, MaxPartSizeLimitExceeded) {
     bool part_uploaded = fm_limits.upload_part(*upload_id, 1, large_part);
     EXPECT_FALSE(part_uploaded);
     
-    fm_limits.abort_multipart_upload(*upload_id);
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id));
 }
 
 TEST_F(FileManagerTest, MaxPartsPerUploadLimit) {
@@ -531,7 +529,7 @@ TEST_F(FileManagerTest, MaxPartsPerUploadLimit) {
     bool part3 = fm_limits.upload_part(*upload_id, 3, part_data);
     EXPECT_FALSE(part3);
     
-    fm_limits.abort_multipart_upload(*upload_id);
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id));
 }
 
 TEST_F(FileManagerTest, MaxTempStorageTotalLimit) {
@@ -554,8 +552,8 @@ TEST_F(FileManagerTest, MaxTempStorageTotalLimit) {
     bool uploaded2 = fm_limits.upload_part(*upload_id2, 1, part2);
     EXPECT_FALSE(uploaded2); // лимит временных файлов превышен
     
-    fm_limits.abort_multipart_upload(*upload_id1);
-    fm_limits.abort_multipart_upload(*upload_id2);
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id1));
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id2));
 }
 
 TEST_F(FileManagerTest, StreamUploadMaxFileSizeLimit) {
@@ -574,7 +572,7 @@ TEST_F(FileManagerTest, StreamUploadMaxFileSizeLimit) {
     bool written2 = fm_limits.write_to_stream(*stream_id, data2);
     EXPECT_FALSE(written2); // превышение 1024 (600+500=1100)
     
-    fm_limits.abort_stream_upload(*stream_id);
+    EXPECT_TRUE(fm_limits.abort_stream_upload(*stream_id));
 }
 
 TEST_F(FileManagerTest, UploadFileStreamRespectsLimit) {
@@ -757,8 +755,8 @@ TEST_F(FileManagerTest, MultipartUpload_Progress) {
     // Загружаем части
     std::vector<char> data1(100, '1');
     std::vector<char> data2(200, '2');
-    _file_manager->upload_part(upload_id, 5, data1);
-    _file_manager->upload_part(upload_id, 2, data2);
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 5, data1));
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 2, data2));
     
     progress = _file_manager->get_upload_progress(upload_id);
     ASSERT_TRUE(progress.has_value());
@@ -768,12 +766,12 @@ TEST_F(FileManagerTest, MultipartUpload_Progress) {
     
     // Загружаем ещё одну часть с тем же номером (перезапись)
     std::vector<char> data3(150, '3');
-    _file_manager->upload_part(upload_id, 2, data3);
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 2, data3));
     
     progress = _file_manager->get_upload_progress(upload_id);
     EXPECT_EQ((*progress)[2], 150); // размер обновился
     
-    _file_manager->abort_multipart_upload(upload_id);
+    EXPECT_TRUE(_file_manager->abort_multipart_upload(upload_id));
 }
 
 TEST_F(FileManagerTest, MultipartUpload_ResumePart) {
@@ -830,7 +828,7 @@ TEST_F(FileManagerTest, MultipartUpload_EmptyPartsList) {
     std::vector<int> empty_parts;
     EXPECT_FALSE(_file_manager->complete_multipart_upload(upload_id, empty_parts));
     
-    _file_manager->abort_multipart_upload(upload_id);
+    EXPECT_TRUE(_file_manager->abort_multipart_upload(upload_id));
 }
 
 // ========== RANGE REQUESTS ==========
@@ -841,7 +839,7 @@ TEST_F(FileManagerTest, DownloadFileRange_Valid) {
     for (size_t i = 0; i < data.size(); ++i) {
         data[i] = static_cast<char>(i % 256);
     }
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Скачиваем диапазон 100-199 (100 байт)
     auto range_data = _file_manager->download_file_range(filename, 100, 199);
@@ -857,7 +855,7 @@ TEST_F(FileManagerTest, DownloadFileRange_StartOnly) {
     std::string filename = "range_start.bin";
     std::vector<char> data(1024);
     for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<char>(i);
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Открытый диапазон: от 512 до конца (не реализовано, но функция ожидает start и end)
     // Текущая реализация требует end. Проверим, что можно указать end = size-1
@@ -869,7 +867,7 @@ TEST_F(FileManagerTest, DownloadFileRange_StartOnly) {
 TEST_F(FileManagerTest, DownloadFileRange_OutOfBounds) {
     std::string filename = "range_oob.bin";
     std::vector<char> data(100, 'X');
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Start за пределами файла
     auto range1 = _file_manager->download_file_range(filename, 200, 300);
@@ -886,7 +884,7 @@ TEST_F(FileManagerTest, DownloadFileRange_OutOfBounds) {
 TEST_F(FileManagerTest, DownloadFileRange_InvalidRange) {
     std::string filename = "range_invalid.bin";
     std::vector<char> data(100, 'Y');
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // start > end
     auto range = _file_manager->download_file_range(filename, 50, 40);
@@ -928,7 +926,7 @@ TEST_F(FileManagerTest, StreamUpload_CleanupOnDestruction) {
 TEST_F(FileManagerTest, DownloadFileStream_Works) {
     std::string filename = "download_stream.bin";
     std::vector<char> data(1024 * 1024, 'F'); // 1 MB
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     std::stringstream output;
     bool success = _file_manager->download_file_stream(filename, output);
@@ -966,15 +964,15 @@ TEST_F(FileManagerTest, CacheEviction_LRU) {
     std::vector<char> medium_data(1024, 'M');
     std::vector<char> large_data(1024, 'L'); // ещё 1 KB
     
-    fm_cache.upload_file("small.bin", small_data);
-    fm_cache.upload_file("medium.bin", medium_data);
-    fm_cache.upload_file("large.bin", large_data);
+    EXPECT_TRUE(fm_cache.upload_file("small.bin", small_data));
+    EXPECT_TRUE(fm_cache.upload_file("medium.bin", medium_data));
+    EXPECT_TRUE(fm_cache.upload_file("large.bin", large_data));
     
     // Загружаем их в кэш
-    fm_cache.download_file("small.bin");  // 512 bytes
-    fm_cache.download_file("medium.bin"); // 1024 bytes
+    (void)fm_cache.download_file("small.bin");  // 512 bytes
+    (void)fm_cache.download_file("medium.bin"); // 1024 bytes
     // кэш: small + medium = 1536 байт
-    fm_cache.download_file("large.bin");  // 1024 bytes, суммарно 2560 > 2048 -> должен вытеснить LRU
+    (void)fm_cache.download_file("large.bin");  // 1024 bytes, суммарно 2560 > 2048 -> должен вытеснить LRU
     
     // Проверяем, что самый старый (small) вытеснен
     // Косвенно: при следующем скачивании small должен читаться с диска (но мы не можем легко проверить)
@@ -1000,7 +998,7 @@ TEST_F(FileManagerTest, CacheTTLExpiration) {
     file_manager fm_cache(_temp_dir.string(), upload_limits(), cfg);
     
     std::vector<char> data(100, 'T');
-    fm_cache.upload_file("ttl.bin", data);
+    EXPECT_TRUE(fm_cache.upload_file("ttl.bin", data));
     
     // Первое скачивание - кэшируется
     auto dl1 = fm_cache.download_file("ttl.bin");
@@ -1023,7 +1021,7 @@ TEST_F(FileManagerTest, CacheTTLExpiration) {
 TEST_F(FileManagerTest, CustomMetadata_LargeValues) {
     std::string filename = "large_meta.txt";
     std::vector<char> data = {'d', 'a', 't', 'a'};
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     // Создаём большое значение (10 KB)
     std::string large_value(10 * 1024, 'M');
@@ -1087,7 +1085,7 @@ TEST_F(FileManagerTest, ConcurrentOperations) {
             
             // Иногда удаляем
             if (i % 3 == 0) {
-                _file_manager->delete_file(filename);
+                (void)_file_manager->delete_file(filename);
             }
         }
     };
@@ -1184,14 +1182,14 @@ TEST_F(FileManagerTest, TempStorageCleanupOnAbort) {
     EXPECT_TRUE(fm_limits.upload_part(*upload_id, 1, part));
     
     // Абортим - должно освободить место
-    fm_limits.abort_multipart_upload(*upload_id);
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id));
     
     // Теперь должно быть достаточно места для новой загрузки
     auto upload_id2 = fm_limits.initiate_multipart_upload("temp2.bin");
     ASSERT_TRUE(upload_id2.has_value());
     EXPECT_TRUE(fm_limits.upload_part(*upload_id2, 1, part));
     
-    fm_limits.abort_multipart_upload(*upload_id2);
+    EXPECT_TRUE(fm_limits.abort_multipart_upload(*upload_id2));
 }
 
 // ========== ПРОВЕРКА ETAG НА БОЛЬШИХ ФАЙЛАХ ==========
@@ -1205,7 +1203,7 @@ TEST_F(FileManagerTest, ETagLargeFile) {
         byte = static_cast<char>(dist(rng));
     }
     
-    _file_manager->upload_file(filename, data);
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
     
     auto metadata1 = _file_manager->get_metadata(filename);
     auto metadata2 = _file_manager->get_metadata(filename);

@@ -2,7 +2,6 @@
 
 #include <fstream>
 #include <nlohmann/json.hpp>
-#include <chrono>
 
 #include "authorizer.hpp"
 
@@ -210,7 +209,7 @@ TEST_F(AuthorizerTest, GetResourceACLInheritance) {
     resource_acl parent_acl;
     parent_acl.resource_path = "/bucket";
     parent_acl.is_public = true;
-    auth->set_resource_acl("/bucket", parent_acl);
+    EXPECT_TRUE(auth->set_resource_acl("/bucket", parent_acl));
 
     // Child should inherit
     auto child_acl = auth->get_resource_acl("/bucket/sub/file.txt");
@@ -222,7 +221,7 @@ TEST_F(AuthorizerTest, GetResourceACLInheritance) {
 TEST_F(AuthorizerTest, RemoveResourceACL) {
     resource_acl acl;
     acl.resource_path = "/test";
-    auth->set_resource_acl("/test", acl);
+    EXPECT_TRUE(auth->set_resource_acl("/test", acl));
 
     bool removed = auth->remove_resource_acl("/test");
     EXPECT_TRUE(removed);
@@ -259,8 +258,8 @@ TEST_F(AuthorizerTest, AddUserPermission) {
 }
 
 TEST_F(AuthorizerTest, RemoveUserPermission) {
-    auth->add_user_permission("/res", "user1", permission_type::READ);
-    auth->add_user_permission("/res", "user1", permission_type::WRITE);
+    EXPECT_TRUE(auth->add_user_permission("/res", "user1", permission_type::READ));
+    EXPECT_TRUE(auth->add_user_permission("/res", "user1", permission_type::WRITE));
 
     bool removed = auth->remove_user_permission("/res", "user1", permission_type::READ);
     EXPECT_TRUE(removed);
@@ -311,7 +310,7 @@ TEST_F(AuthorizerTest, CheckAccessByACL) {
     ASSERT_TRUE(user.has_value());
 
     // Grant WRITE permission via ACL
-    auth->add_user_permission("/specific", user->user_id, permission_type::WRITE);
+    EXPECT_TRUE(auth->add_user_permission("/specific", user->user_id, permission_type::WRITE));
 
     bool can_write = auth->check_access(user->user_id, "/specific", permission_type::WRITE);
     EXPECT_TRUE(can_write);
@@ -320,14 +319,14 @@ TEST_F(AuthorizerTest, CheckAccessByACL) {
 TEST_F(AuthorizerTest, CheckAccessInactiveUser) {
     auto user = auth->create_user("inactive", "inactive@example.com", user_role::VIEWER);
     ASSERT_TRUE(user.has_value());
-    auth->deactivate_user(user->user_id);
+    EXPECT_TRUE(auth->deactivate_user(user->user_id));
 
     bool access = auth->check_access(user->user_id, "/resource", permission_type::READ);
     EXPECT_FALSE(access);
 }
 
 TEST_F(AuthorizerTest, CheckPublicAccess) {
-    auth->make_resource_public("/public.txt");
+    EXPECT_TRUE(auth->make_resource_public("/public.txt"));
 
     bool public_read = auth->check_public_access("/public.txt", permission_type::READ);
     EXPECT_TRUE(public_read);
@@ -357,7 +356,7 @@ TEST_F(AuthorizerTest, IsResourceOwner) {
     resource_acl acl;
     acl.resource_path = "/owned";
     acl.owner_user_id = owner->user_id;
-    auth->set_resource_acl("/owned", acl);
+    EXPECT_TRUE(auth->set_resource_acl("/owned", acl));
 
     EXPECT_TRUE(auth->is_resource_owner(owner->user_id, "/owned"));
     EXPECT_FALSE(auth->is_resource_owner("other", "/owned"));
@@ -447,7 +446,7 @@ TEST_F(AuthorizerTest, GroupPermissions) {
     EXPECT_TRUE(added);
     
     // Даём группе право WRITE на ресурс
-    auth->add_group_permission("/project", "developers", permission_type::WRITE);
+    EXPECT_TRUE(auth->add_group_permission("/project", "developers", permission_type::WRITE));
     
     // Проверяем доступ пользователя через группу
     bool can_write = auth->check_access(user->user_id, "/project", permission_type::WRITE);
@@ -474,8 +473,8 @@ TEST_F(AuthorizerTest, GetUserGroups) {
     auto user = auth->create_user("multigroup_user", "multi@example.com");
     ASSERT_TRUE(user.has_value());
     
-    auth->add_user_to_group(user->user_id, "group1");
-    auth->add_user_to_group(user->user_id, "group2");
+    EXPECT_TRUE(auth->add_user_to_group(user->user_id, "group1"));
+    EXPECT_TRUE(auth->add_user_to_group(user->user_id, "group2"));
     
     auto groups = auth->get_user_groups(user->user_id);
     EXPECT_EQ(groups.size(), 2);
@@ -493,8 +492,8 @@ TEST_F(AuthorizerTest, GetGroupMembers) {
     ASSERT_TRUE(user1.has_value());
     ASSERT_TRUE(user2.has_value());
     
-    auth->add_user_to_group(user1->user_id, "team");
-    auth->add_user_to_group(user2->user_id, "team");
+    EXPECT_TRUE(auth->add_user_to_group(user1->user_id, "team"));
+    EXPECT_TRUE(auth->add_user_to_group(user2->user_id, "team"));
     
     auto members = auth->get_group_members("team");
     EXPECT_EQ(members.size(), 2);
@@ -513,7 +512,7 @@ TEST_F(AuthorizerTest, ACLInheritanceWithOverrides) {
     parent_acl.resource_path = "/bucket";
     parent_acl.is_public = false;
     parent_acl.user_permissions[user->user_id] = {permission_type::READ};
-    auth->set_resource_acl("/bucket", parent_acl);
+    EXPECT_TRUE(auth->set_resource_acl("/bucket", parent_acl));
     
     // Для дочернего файла задаём более строгий ACL: явно запрещаем READ через пустые права
     // (по умолчанию если ACL есть, то наследование не применяется, нужно проверить)
@@ -521,7 +520,7 @@ TEST_F(AuthorizerTest, ACLInheritanceWithOverrides) {
     child_acl.resource_path = "/bucket/secret.txt";
     child_acl.is_public = false;
     // Не даём никаких прав пользователю
-    auth->set_resource_acl("/bucket/secret.txt", child_acl);
+    EXPECT_TRUE(auth->set_resource_acl("/bucket/secret.txt", child_acl));
     
     // Проверяем доступ к родительской директории - должен быть READ
     bool can_read_parent = auth->check_access(user->user_id, "/bucket", permission_type::READ);
@@ -547,12 +546,12 @@ TEST_F(AuthorizerTest, ACLInheritanceWithOverrides) {
     resource_acl parent2_acl;
     parent2_acl.resource_path = "/shared";
     parent2_acl.user_permissions[guest->user_id] = {permission_type::WRITE};
-    auth->set_resource_acl("/shared", parent2_acl);
+    EXPECT_TRUE(auth->set_resource_acl("/shared", parent2_acl));
     
     // Дочерний без WRITE
     resource_acl child2_acl;
     child2_acl.resource_path = "/shared/private.txt";
-    auth->set_resource_acl("/shared/private.txt", child2_acl);
+    EXPECT_TRUE(auth->set_resource_acl("/shared/private.txt", child2_acl));
     
     bool can_write_parent = auth->check_access(guest->user_id, "/shared", permission_type::WRITE);
     EXPECT_TRUE(can_write_parent);
@@ -600,8 +599,8 @@ TEST_F(AuthorizerTest, LoadSaveUsersAndACLs) {
     ASSERT_TRUE(user1.has_value());
     ASSERT_TRUE(user2.has_value());
     
-    auth->add_user_to_group(user1->user_id, "admins");
-    auth->add_user_to_group(user2->user_id, "developers");
+    EXPECT_TRUE(auth->add_user_to_group(user1->user_id, "admins"));
+    EXPECT_TRUE(auth->add_user_to_group(user2->user_id, "developers"));
     
     // Создаём ACL
     resource_acl acl;
@@ -610,7 +609,7 @@ TEST_F(AuthorizerTest, LoadSaveUsersAndACLs) {
     acl.owner_user_id = user1->user_id;
     acl.user_permissions[user2->user_id] = {permission_type::READ};
     acl.group_permissions["developers"] = {permission_type::WRITE};
-    auth->set_resource_acl("/test", acl);
+    EXPECT_TRUE(auth->set_resource_acl("/test", acl));
     
     // Сохраняем пользователей и ACL во временные файлы
     fs::path temp_users = fs::temp_directory_path() / "test_users.json";
@@ -680,18 +679,18 @@ TEST_F(AuthorizerTest, MultipleGroupsAccess) {
     auto user = auth->create_user("multi", "multi@example.com", user_role::VIEWER);
     ASSERT_TRUE(user.has_value());
     
-    auth->add_user_to_group(user->user_id, "groupA");
-    auth->add_user_to_group(user->user_id, "groupB");
+    EXPECT_TRUE(auth->add_user_to_group(user->user_id, "groupA"));
+    EXPECT_TRUE(auth->add_user_to_group(user->user_id, "groupB"));
     
     // Даём права WRITE только группе groupB
-    auth->add_group_permission("/shared", "groupB", permission_type::WRITE);
+    EXPECT_TRUE(auth->add_group_permission("/shared", "groupB", permission_type::WRITE));
     
     // Пользователь должен иметь WRITE через groupB
     bool can_write = auth->check_access(user->user_id, "/shared", permission_type::WRITE);
     EXPECT_TRUE(can_write);
     
     // Проверяем, что если удалить из groupB, доступ пропадает
-    auth->remove_user_from_group(user->user_id, "groupB");
+    EXPECT_TRUE(auth->remove_user_from_group(user->user_id, "groupB"));
     bool can_write_after = auth->check_access(user->user_id, "/shared", permission_type::WRITE);
     EXPECT_FALSE(can_write_after);
     
@@ -710,7 +709,7 @@ TEST_F(AuthorizerTest, ResourceOwnerImplicitPermissions) {
     resource_acl acl;
     acl.resource_path = "/myfile.txt";
     acl.owner_user_id = owner->user_id;
-    auth->set_resource_acl("/myfile.txt", acl);
+    EXPECT_TRUE(auth->set_resource_acl("/myfile.txt", acl));
     
     // Владелец должен иметь все права (в текущей реализации is_resource_owner проверяется отдельно)
     // check_access должен предоставлять доступ владельцу
@@ -761,7 +760,7 @@ TEST(AuthorizerStaticTest, MatchesPatternEdgeCases) {
 TEST_F(AuthorizerTest, SaveLoadUsersPreservesGroups) {
     auto user = auth->create_user("groupuser", "group@test.com");
     ASSERT_TRUE(user.has_value());
-    auth->add_user_to_group(user->user_id, "testgroup");
+    EXPECT_TRUE(auth->add_user_to_group(user->user_id, "testgroup"));
     
     fs::path temp_file = fs::temp_directory_path() / "users_with_groups.json";
     bool saved = auth->save_users(temp_file.string());

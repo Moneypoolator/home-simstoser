@@ -110,7 +110,9 @@ s3_server::s3_server(const std::string& address,
 s3_server::~s3_server()
 {
     if (_authorizer && !_users_file.empty()) {
-        _authorizer->save_users(_users_file);
+        if (!_authorizer->save_users(_users_file)) {
+            LOG(ERROR) << "Save user autorization file  error: " << _users_file;
+        }
     }
     stop();
 }

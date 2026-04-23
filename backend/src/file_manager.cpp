@@ -1150,7 +1150,6 @@ bool file_manager::download_file_stream(const std::string& filename, std::ostrea
     constexpr size_t buffer_size = 1024 * 1024;
     std::vector<char> buffer(buffer_size);
     
-    ssize_t bytes_sent;
     while (offset < size) {
         size_t to_read = std::min(buffer_size, static_cast<size_t>(size - offset));
         ssize_t bytes_read = read(fd, buffer.data(), to_read);
@@ -1167,13 +1166,13 @@ bool file_manager::download_file_stream(const std::string& filename, std::ostrea
 
 void file_manager::invalidate_content_cache(const std::string& filename) {
     if (!_cache_cfg.enabled) return;
-    _content_cache.erase(filename);
+    (void)_content_cache.erase(filename);
     VLOG(2) << "Content cache invalidated for: " << filename;
 }
 
 void file_manager::invalidate_metadata_cache(const std::string& filename) {
     if (!_cache_cfg.enabled) return;
-    _metadata_cache.erase(filename);
+    (void)_metadata_cache.erase(filename);
     VLOG(2) << "Metadata cache invalidated for: " << filename;
 }
 

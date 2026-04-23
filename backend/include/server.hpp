@@ -154,7 +154,7 @@ private:
     std::atomic<int> _active_sessions{0};
     std::mutex _shutdown_mutex;
     std::condition_variable _shutdown_cv;
-    bool _shutdown_requested{false};
+
     
     std::optional<ssl_config> _ssl_config;
     std::optional<cors_config> _cors_config;

@@ -204,7 +204,7 @@ void rate_limiter::cleanup()
     std::lock_guard<std::mutex> lock(_mutex);
     
     // Remove IPs with no recent activity (older than 24 hours)
-    auto one_day_ago = now() - hours(24);
+    // auto one_day_ago = now() - hours(24); // unused
     
     for (auto it = _ip_data_map.begin(); it != _ip_data_map.end(); ) {
         auto& data = it->second;
@@ -235,10 +235,10 @@ void rate_limiter::reset()
 
 void rate_limiter::cleanup_old_requests(ip_data& data)
 {
-    auto one_hour_ago = now() - hours(1);
+    //auto one_hour_ago = now() - hours(1);
     data.request_timestamps.erase(
         std::remove_if(data.request_timestamps.begin(), data.request_timestamps.end(),
-            [this, one_hour_ago](const auto& timestamp) {
+            [this/*, one_hour_ago*/](const auto& timestamp) {
                 return is_expired(timestamp, hours(1));
             }),
         data.request_timestamps.end()
@@ -247,10 +247,10 @@ void rate_limiter::cleanup_old_requests(ip_data& data)
 
 void rate_limiter::cleanup_old_connections(ip_data& data)
 {
-    auto one_minute_ago = now() - minutes(1);
+    //auto one_minute_ago = now() - minutes(1);
     data.connection_timestamps.erase(
         std::remove_if(data.connection_timestamps.begin(), data.connection_timestamps.end(),
-            [this, one_minute_ago](const auto& timestamp) {
+            [this/*, one_minute_ago*/](const auto& timestamp) {
                 return is_expired(timestamp, minutes(1));
             }),
         data.connection_timestamps.end()
@@ -259,10 +259,10 @@ void rate_limiter::cleanup_old_connections(ip_data& data)
 
 void rate_limiter::cleanup_old_ddos_entries(ip_data& data)
 {
-    auto ddos_window_ago = now() - seconds(_config.ddos_window);
+    //auto ddos_window_ago = now() - seconds(_config.ddos_window);
     data.ddos_timestamps.erase(
         std::remove_if(data.ddos_timestamps.begin(), data.ddos_timestamps.end(),
-            [this, ddos_window_ago](const auto& timestamp) {
+            [this/*, ddos_window_ago*/](const auto& timestamp) {
                 return is_expired(timestamp, seconds(_config.ddos_window));
             }),
         data.ddos_timestamps.end()
