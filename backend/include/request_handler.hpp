@@ -213,8 +213,37 @@ public:
     http::response<http::file_body> handle_get_file_body(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
 
-private:
-    friend class RequestHandlerTest;
+    // Multipart upload handlers
+    http::response<http::string_body> handle_initiate_upload(const http::request<http::string_body>& req);
+    // http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_complete_upload(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_abort_upload(const http::request<http::string_body>& req);
+    
+    // Static file handler
+    http::response<http::string_body> handle_static_file(const std::string& path);
+    // В классе request_handler добавить:
+    http::response<http::string_body> handle_index(const http::request<http::string_body>& req);
+
+    // Применение CORS заголовков к ответу
+    template<class Body>
+    void apply_cors_headers(http::response<Body>& response, const http::request<http::string_body>& req) const;
+
+
+    // === Аутентификация: проверка подписи запроса ===
+    struct auth_result {
+        bool authenticated;
+        std::optional<std::string> user_id;
+        std::optional<std::string> username;
+    };
+
+    auth_result authenticate_request(const http::request<http::string_body>& req) const;
+
+    http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
+
+// private:
+//     friend class RequestHandlerTest;
+//     friend class RequestHandlerAuthTest;
+
     file_manager& _file_manager;
     std::shared_ptr<authenticator> _authenticator;
     std::shared_ptr<authorizer> _authorizer;
@@ -223,14 +252,9 @@ private:
     std::optional<s3_server::cors_config> _cors_config;
     compression::compression_config _compression_config;
     
-    // === Аутентификация: проверка подписи запроса ===
-    struct auth_result {
-        bool authenticated;
-        std::optional<std::string> user_id;
-        std::optional<std::string> username;
-    };
+
     
-    auth_result authenticate_request(const http::request<http::string_body>& req) const;
+
     
     // === Авторизация: проверка прав доступа ===
     [[nodiscard]] bool authorize_request(
@@ -259,27 +283,14 @@ private:
     // URL декодирование
     static std::string url_decode(const std::string& encoded);
     
-    // Применение CORS заголовков к ответу
-    template<class Body>
-    void apply_cors_headers(http::response<Body>& response, const http::request<http::string_body>& req) const;
     
     // Обработчики для разных методов
     // http::response<http::file_body> handle_get_file(const std::string& filename);
     
     
-    // Multipart upload handlers
-    http::response<http::string_body> handle_initiate_upload(const http::request<http::string_body>& req);
-    // http::response<http::string_body> handle_upload_part(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_complete_upload(const http::request<http::string_body>& req);
-    http::response<http::string_body> handle_abort_upload(const http::request<http::string_body>& req);
-    
-    // Static file handler
-    http::response<http::string_body> handle_static_file(const std::string& path);
-    // В классе request_handler добавить:
-    http::response<http::string_body> handle_index(const http::request<http::string_body>& req);
+
     [[nodiscard]] bool is_static_file_request(const std::string& path) const;
 
-    http::response<http::string_body> handle_openapi_spec(const http::request<http::string_body>& req);
 
     // Вспомогательные функции
     

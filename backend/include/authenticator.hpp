@@ -77,6 +77,9 @@ public:
     // Построение канонической строки запроса (отсортированные и закодированные параметры)
     std::string build_canonical_query_string(const std::string& uri) const;
     
+        std::string sha256_hex(const std::string& data) const;
+        std::string hmac_sha256_hex(const std::string& key, const std::string& data) const;
+        std::string hex_encode(const unsigned char* data, size_t len) const;
 
     private:
         std::map<std::string, access_key> _keys;
@@ -89,9 +92,7 @@ public:
             const std::string& date_stamp,
             const std::string& region_name,
             const std::string& service_name) const;
-        std::string sha256_hex(const std::string& data) const;
-        std::string hmac_sha256_hex(const std::string& key, const std::string& data) const;
-        std::string hex_encode(const unsigned char* data, size_t len) const;
+
 
         // Генерация уникального access_key_id
         std::string generate_access_key_id() const;

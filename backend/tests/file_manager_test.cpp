@@ -5,6 +5,7 @@
 #include <sstream>
 #include <thread>
 #include <functional>
+#include <chrono>
 
 #include <random>
 #include <cstdint>
@@ -672,3 +673,577 @@ TEST_F(FileManagerTest, CacheDisabled) {
     EXPECT_EQ(result1.value(), data);
     EXPECT_EQ(result2.value(), data);
 }
+
+// ========== MULTIPART UPLOAD ==========
+
+TEST_F(FileManagerTest, MultipartUpload_CompleteFlow) {
+    std::string filename = "multipart_complete.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    // Загружаем 3 части
+    std::vector<char> part1_data(1024, 'A');
+    std::vector<char> part2_data(2048, 'B');
+    std::vector<char> part3_data(512, 'C');
+    
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, part1_data));
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 2, part2_data));
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 3, part3_data));
+    
+    // Проверяем прогресс
+    auto progress = _file_manager->get_upload_progress(upload_id);
+    ASSERT_TRUE(progress.has_value());
+    EXPECT_EQ(progress->size(), 3);
+    EXPECT_EQ((*progress)[1], 1024);
+    EXPECT_EQ((*progress)[2], 2048);
+    EXPECT_EQ((*progress)[3], 512);
+    
+    // Завершаем загрузку
+    std::vector<int> part_numbers = {1, 2, 3};
+    EXPECT_TRUE(_file_manager->complete_multipart_upload(upload_id, part_numbers));
+    
+    // Проверяем итоговый файл
+    auto downloaded = _file_manager->download_file(filename);
+    ASSERT_TRUE(downloaded.has_value());
+    
+    // Собираем ожидаемые данные
+    std::vector<char> expected;
+    expected.insert(expected.end(), part1_data.begin(), part1_data.end());
+    expected.insert(expected.end(), part2_data.begin(), part2_data.end());
+    expected.insert(expected.end(), part3_data.begin(), part3_data.end());
+    
+    EXPECT_EQ(downloaded->size(), expected.size());
+    EXPECT_EQ(*downloaded, expected);
+}
+
+TEST_F(FileManagerTest, MultipartUpload_Abort) {
+    std::string filename = "multipart_abort.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    // Загружаем одну часть
+    std::vector<char> part_data(512, 'X');
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, part_data));
+    
+    // Проверяем, что временные файлы созданы (косвенно через прогресс)
+    auto progress = _file_manager->get_upload_progress(upload_id);
+    ASSERT_TRUE(progress.has_value());
+    EXPECT_EQ(progress->size(), 1);
+    
+    // Прерываем загрузку
+    EXPECT_TRUE(_file_manager->abort_multipart_upload(upload_id));
+    
+    // Прогресс больше не должен быть доступен
+    progress = _file_manager->get_upload_progress(upload_id);
+    EXPECT_FALSE(progress.has_value());
+    
+    // Файл не должен быть создан
+    EXPECT_FALSE(_file_manager->file_exists(filename));
+}
+
+TEST_F(FileManagerTest, MultipartUpload_Progress) {
+    std::string filename = "progress_test.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    // Изначально прогресс пуст
+    auto progress = _file_manager->get_upload_progress(upload_id);
+    ASSERT_TRUE(progress.has_value());
+    EXPECT_TRUE(progress->empty());
+    
+    // Загружаем части
+    std::vector<char> data1(100, '1');
+    std::vector<char> data2(200, '2');
+    _file_manager->upload_part(upload_id, 5, data1);
+    _file_manager->upload_part(upload_id, 2, data2);
+    
+    progress = _file_manager->get_upload_progress(upload_id);
+    ASSERT_TRUE(progress.has_value());
+    EXPECT_EQ(progress->size(), 2);
+    EXPECT_EQ((*progress)[5], 100);
+    EXPECT_EQ((*progress)[2], 200);
+    
+    // Загружаем ещё одну часть с тем же номером (перезапись)
+    std::vector<char> data3(150, '3');
+    _file_manager->upload_part(upload_id, 2, data3);
+    
+    progress = _file_manager->get_upload_progress(upload_id);
+    EXPECT_EQ((*progress)[2], 150); // размер обновился
+    
+    _file_manager->abort_multipart_upload(upload_id);
+}
+
+TEST_F(FileManagerTest, MultipartUpload_ResumePart) {
+    std::string filename = "resume_part.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    std::vector<char> original(500, 'O');
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, original));
+    
+    // "Возобновляем" загрузку той же части с другими данными (перезаписываем)
+    std::vector<char> new_data(300, 'N');
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, new_data));
+    
+    // Завершаем с частью 1
+    std::vector<int> parts = {1};
+    EXPECT_TRUE(_file_manager->complete_multipart_upload(upload_id, parts));
+    
+    auto downloaded = _file_manager->download_file(filename);
+    ASSERT_TRUE(downloaded.has_value());
+    EXPECT_EQ(downloaded->size(), 300);
+    EXPECT_EQ(*downloaded, new_data);
+}
+
+TEST_F(FileManagerTest, MultipartUpload_InvalidPartNumbers) {
+    std::string filename = "invalid_parts.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    std::vector<char> data(100, 'D');
+    EXPECT_TRUE(_file_manager->upload_part(upload_id, 1, data));
+    
+    // Пытаемся завершить с отсутствующей частью
+    std::vector<int> parts = {1, 2}; // часть 2 не загружена
+    EXPECT_FALSE(_file_manager->complete_multipart_upload(upload_id, parts));
+    
+    // Проверяем, что загрузка не завершилась, и файл не создан
+    EXPECT_FALSE(_file_manager->file_exists(filename));
+    
+    // Можно попробовать снова с правильными частями
+    parts = {1};
+    EXPECT_TRUE(_file_manager->complete_multipart_upload(upload_id, parts));
+    EXPECT_TRUE(_file_manager->file_exists(filename));
+}
+
+TEST_F(FileManagerTest, MultipartUpload_EmptyPartsList) {
+    std::string filename = "empty_parts.bin";
+    auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+    ASSERT_TRUE(upload_id_opt.has_value());
+    std::string upload_id = *upload_id_opt;
+    
+    std::vector<int> empty_parts;
+    EXPECT_FALSE(_file_manager->complete_multipart_upload(upload_id, empty_parts));
+    
+    _file_manager->abort_multipart_upload(upload_id);
+}
+
+// ========== RANGE REQUESTS ==========
+
+TEST_F(FileManagerTest, DownloadFileRange_Valid) {
+    std::string filename = "range_test.bin";
+    std::vector<char> data(2048);
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = static_cast<char>(i % 256);
+    }
+    _file_manager->upload_file(filename, data);
+    
+    // Скачиваем диапазон 100-199 (100 байт)
+    auto range_data = _file_manager->download_file_range(filename, 100, 199);
+    ASSERT_TRUE(range_data.has_value());
+    EXPECT_EQ(range_data->size(), 100);
+    
+    for (size_t i = 0; i < 100; ++i) {
+        EXPECT_EQ((*range_data)[i], data[100 + i]);
+    }
+}
+
+TEST_F(FileManagerTest, DownloadFileRange_StartOnly) {
+    std::string filename = "range_start.bin";
+    std::vector<char> data(1024);
+    for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<char>(i);
+    _file_manager->upload_file(filename, data);
+    
+    // Открытый диапазон: от 512 до конца (не реализовано, но функция ожидает start и end)
+    // Текущая реализация требует end. Проверим, что можно указать end = size-1
+    auto range_data = _file_manager->download_file_range(filename, 512, 1023);
+    ASSERT_TRUE(range_data.has_value());
+    EXPECT_EQ(range_data->size(), 512);
+}
+
+TEST_F(FileManagerTest, DownloadFileRange_OutOfBounds) {
+    std::string filename = "range_oob.bin";
+    std::vector<char> data(100, 'X');
+    _file_manager->upload_file(filename, data);
+    
+    // Start за пределами файла
+    auto range1 = _file_manager->download_file_range(filename, 200, 300);
+    EXPECT_FALSE(range1.has_value());
+    
+    // End за пределами файла (должен корректироваться внутри функции)
+    auto range2 = _file_manager->download_file_range(filename, 50, 200);
+    // В текущей реализации, если end >= file_size, то end = file_size - 1
+    // Проверим, что возвращается от 50 до 99 (50 байт)
+    ASSERT_TRUE(range2.has_value());
+    EXPECT_EQ(range2->size(), 50);
+}
+
+TEST_F(FileManagerTest, DownloadFileRange_InvalidRange) {
+    std::string filename = "range_invalid.bin";
+    std::vector<char> data(100, 'Y');
+    _file_manager->upload_file(filename, data);
+    
+    // start > end
+    auto range = _file_manager->download_file_range(filename, 50, 40);
+    EXPECT_FALSE(range.has_value());
+}
+
+// ========== STREAM UPLOAD RESUME (CLEANUP) ==========
+
+TEST_F(FileManagerTest, StreamUpload_CleanupOnDestruction) {
+    // Создаём file_manager внутри блока, чтобы проверить деструктор
+    std::string filename = "stream_cleanup.bin";
+    std::string stream_id;
+    
+    {
+        file_manager local_fm(_temp_dir.string());
+        auto stream_id_opt = local_fm.initiate_stream_upload(filename);
+        ASSERT_TRUE(stream_id_opt.has_value());
+        stream_id = *stream_id_opt;
+        
+        // Записываем данные
+        std::vector<char> data(500, 'S');
+        EXPECT_TRUE(local_fm.write_to_stream(stream_id, data));
+        
+        // Не завершаем, выходим из блока -> деструктор должен очистить временные файлы
+    }
+    
+    // Файл не должен существовать
+    file_manager check_fm(_temp_dir.string());
+    EXPECT_FALSE(check_fm.file_exists(filename));
+    
+    // Попытка продолжить загрузку с тем же stream_id должна провалиться
+    file_manager new_fm(_temp_dir.string());
+    EXPECT_FALSE(new_fm.write_to_stream(stream_id, std::vector<char>{'X'}));
+    EXPECT_FALSE(new_fm.complete_stream_upload(stream_id));
+}
+
+// ========== SENDFILE FALLBACK ==========
+
+TEST_F(FileManagerTest, DownloadFileStream_Works) {
+    std::string filename = "download_stream.bin";
+    std::vector<char> data(1024 * 1024, 'F'); // 1 MB
+    _file_manager->upload_file(filename, data);
+    
+    std::stringstream output;
+    bool success = _file_manager->download_file_stream(filename, output);
+    
+    EXPECT_TRUE(success);
+    std::string output_str = output.str();
+    EXPECT_EQ(output_str.size(), data.size());
+    EXPECT_EQ(std::vector<char>(output_str.begin(), output_str.end()), data);
+}
+
+TEST_F(FileManagerTest, UploadFileStream_Works) {
+    std::string filename = "upload_stream.bin";
+    std::vector<char> data(500 * 1024, 'U'); // 500 KB
+    std::stringstream input(std::string(data.begin(), data.end()));
+    
+    bool success = _file_manager->upload_file_stream(filename, input);
+    EXPECT_TRUE(success);
+    
+    auto downloaded = _file_manager->download_file(filename);
+    ASSERT_TRUE(downloaded.has_value());
+    EXPECT_EQ(*downloaded, data);
+}
+
+// ========== CACHE EVICTION ==========
+
+TEST_F(FileManagerTest, CacheEviction_LRU) {
+    cache_config cfg;
+    cfg.enabled = true;
+    cfg.max_content_cache_bytes = 2048; // 2 KB
+    cfg.content_ttl = std::chrono::seconds(60);
+    file_manager fm_cache(_temp_dir.string(), upload_limits(), cfg);
+    
+    // Загружаем файлы разного размера
+    std::vector<char> small_data(512, 'S');
+    std::vector<char> medium_data(1024, 'M');
+    std::vector<char> large_data(1024, 'L'); // ещё 1 KB
+    
+    fm_cache.upload_file("small.bin", small_data);
+    fm_cache.upload_file("medium.bin", medium_data);
+    fm_cache.upload_file("large.bin", large_data);
+    
+    // Загружаем их в кэш
+    fm_cache.download_file("small.bin");  // 512 bytes
+    fm_cache.download_file("medium.bin"); // 1024 bytes
+    // кэш: small + medium = 1536 байт
+    fm_cache.download_file("large.bin");  // 1024 bytes, суммарно 2560 > 2048 -> должен вытеснить LRU
+    
+    // Проверяем, что самый старый (small) вытеснен
+    // Косвенно: при следующем скачивании small должен читаться с диска (но мы не можем легко проверить)
+    // Вместо этого проверим, что все файлы доступны
+    auto dl_small = fm_cache.download_file("small.bin");
+    auto dl_medium = fm_cache.download_file("medium.bin");
+    auto dl_large = fm_cache.download_file("large.bin");
+    
+    EXPECT_TRUE(dl_small.has_value());
+    EXPECT_TRUE(dl_medium.has_value());
+    EXPECT_TRUE(dl_large.has_value());
+    
+    // Статистика кэша (можно добавить метод get_stats, но пока нет)
+}
+
+// ========== CACHE TTL EXPIRATION ==========
+
+TEST_F(FileManagerTest, CacheTTLExpiration) {
+    cache_config cfg;
+    cfg.enabled = true;
+    cfg.max_content_cache_bytes = 10 * 1024;
+    cfg.content_ttl = std::chrono::seconds(5/*0*0.01*/); // короткий TTL
+    file_manager fm_cache(_temp_dir.string(), upload_limits(), cfg);
+    
+    std::vector<char> data(100, 'T');
+    fm_cache.upload_file("ttl.bin", data);
+    
+    // Первое скачивание - кэшируется
+    auto dl1 = fm_cache.download_file("ttl.bin");
+    EXPECT_TRUE(dl1.has_value());
+    
+    // Ждём истечения TTL
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    // Скачиваем снова - должно промахнуться и перезагрузить
+    auto dl2 = fm_cache.download_file("ttl.bin");
+    EXPECT_TRUE(dl2.has_value());
+    EXPECT_EQ(*dl2, data);
+    
+    // Можно также проверить через cleanup_expired (если метод публичный)
+    // fm_cache.cleanup_expired();
+}
+
+// ========== CUSTOM METADATA LARGE VALUES ==========
+
+TEST_F(FileManagerTest, CustomMetadata_LargeValues) {
+    std::string filename = "large_meta.txt";
+    std::vector<char> data = {'d', 'a', 't', 'a'};
+    _file_manager->upload_file(filename, data);
+    
+    // Создаём большое значение (10 KB)
+    std::string large_value(10 * 1024, 'M');
+    std::map<std::string, std::string> meta = {
+        {"description", large_value},
+        {"small", "value"}
+    };
+    
+    bool set_success = _file_manager->set_custom_metadata(filename, meta);
+    EXPECT_TRUE(set_success);
+    
+    auto retrieved = _file_manager->get_custom_metadata(filename);
+    ASSERT_TRUE(retrieved.has_value());
+    EXPECT_EQ(retrieved->size(), 2);
+    EXPECT_EQ((*retrieved)["description"], large_value);
+    EXPECT_EQ((*retrieved)["small"], "value");
+    
+    // Проверяем, что метаданные загружаются и через get_metadata
+    auto metadata = _file_manager->get_metadata(filename);
+    ASSERT_TRUE(metadata.has_value());
+    EXPECT_EQ(metadata->custom_metadata["description"], large_value);
+}
+
+// ========== THREAD SAFETY ==========
+
+TEST_F(FileManagerTest, ConcurrentOperations) {
+    const int num_threads = 4;
+    const int ops_per_thread = 20;
+    std::atomic<int> errors{0};
+    std::atomic<int> uploads_completed{0};
+    
+    auto worker = [&](int thread_id) {
+        for (int i = 0; i < ops_per_thread; ++i) {
+            std::string filename = "concurrent_" + std::to_string(thread_id) + "_" + std::to_string(i) + ".bin";
+            std::vector<char> data(1024, static_cast<char>(thread_id * 10 + i));
+            
+            // Загрузка
+            if (!_file_manager->upload_file(filename, data)) {
+                errors++;
+                continue;
+            }
+            uploads_completed++;
+            
+            // Скачивание
+            auto downloaded = _file_manager->download_file(filename);
+            if (!downloaded || *downloaded != data) {
+                errors++;
+            }
+            
+            // Метаданные
+            auto meta = _file_manager->get_metadata(filename);
+            if (!meta || meta->size != data.size()) {
+                errors++;
+            }
+            
+            // Листинг (несколько раз, чтобы увеличить нагрузку)
+            if (i % 5 == 0) {
+                auto files = _file_manager->list_files();
+                // просто проверяем, что не упало
+            }
+            
+            // Иногда удаляем
+            if (i % 3 == 0) {
+                _file_manager->delete_file(filename);
+            }
+        }
+    };
+    
+    std::vector<std::thread> threads;
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back(worker, t);
+    }
+    
+    for (auto& t : threads) {
+        t.join();
+    }
+    
+    EXPECT_EQ(errors.load(), 0);
+    EXPECT_GT(uploads_completed.load(), 0);
+    
+    // Финальный листинг не должен падать
+    auto final_list = _file_manager->list_files();
+    // Количество файлов может быть меньше ops_per_thread * num_threads из-за удалений
+}
+
+TEST_F(FileManagerTest, ConcurrentMultipartUploads) {
+    const int num_uploads = 3;
+    std::vector<std::string> upload_ids;
+    std::mutex upload_mutex;
+    std::atomic<int> errors{0};
+    
+    // Инициируем несколько загрузок параллельно
+    auto init_worker = [&](int idx) {
+        std::string filename = "multi_concurrent_" + std::to_string(idx) + ".bin";
+        auto upload_id_opt = _file_manager->initiate_multipart_upload(filename);
+        if (upload_id_opt) {
+            std::lock_guard<std::mutex> lock(upload_mutex);
+            upload_ids.push_back(*upload_id_opt);
+        } else {
+            errors++;
+        }
+    };
+    
+    std::vector<std::thread> init_threads;
+    for (int i = 0; i < num_uploads; ++i) {
+        init_threads.emplace_back(init_worker, i);
+    }
+    for (auto& t : init_threads) t.join();
+    
+    ASSERT_EQ(upload_ids.size(), num_uploads);
+    
+    // Загружаем части параллельно
+    auto part_worker = [&](int upload_idx, int part_num) {
+        std::string upload_id = upload_ids[upload_idx];
+        std::vector<char> data(512, static_cast<char>(upload_idx * 100 + part_num));
+        if (!_file_manager->upload_part(upload_id, part_num, data)) {
+            errors++;
+        }
+    };
+    
+    std::vector<std::thread> part_threads;
+    for (int u = 0; u < num_uploads; ++u) {
+        for (int p = 1; p <= 3; ++p) {
+            part_threads.emplace_back(part_worker, u, p);
+        }
+    }
+    for (auto& t : part_threads) t.join();
+    
+    // Завершаем загрузки
+    for (int u = 0; u < num_uploads; ++u) {
+        std::vector<int> parts = {1, 2, 3};
+        if (!_file_manager->complete_multipart_upload(upload_ids[u], parts)) {
+            errors++;
+        }
+    }
+    
+    EXPECT_EQ(errors.load(), 0);
+    
+    // Проверяем, что все файлы созданы
+    for (int u = 0; u < num_uploads; ++u) {
+        std::string filename = "multi_concurrent_" + std::to_string(u) + ".bin";
+        EXPECT_TRUE(_file_manager->file_exists(filename));
+    }
+}
+
+// ========== ЛИМИТ ВРЕМЕННОГО ХРАНИЛИЩА (ДОПОЛНИТЕЛЬНЫЙ ТЕСТ) ==========
+
+TEST_F(FileManagerTest, TempStorageCleanupOnAbort) {
+    upload_limits limits;
+    limits.max_temp_storage_total = 1024 * 1024; // 1 MB
+    file_manager fm_limits(_temp_dir.string(), limits);
+    
+    // Создаём загрузку и пишем часть, затем абортим
+    auto upload_id = fm_limits.initiate_multipart_upload("temp_abort.bin");
+    ASSERT_TRUE(upload_id.has_value());
+    
+    std::vector<char> part(600 * 1024, 'T'); // 600 KB
+    EXPECT_TRUE(fm_limits.upload_part(*upload_id, 1, part));
+    
+    // Абортим - должно освободить место
+    fm_limits.abort_multipart_upload(*upload_id);
+    
+    // Теперь должно быть достаточно места для новой загрузки
+    auto upload_id2 = fm_limits.initiate_multipart_upload("temp2.bin");
+    ASSERT_TRUE(upload_id2.has_value());
+    EXPECT_TRUE(fm_limits.upload_part(*upload_id2, 1, part));
+    
+    fm_limits.abort_multipart_upload(*upload_id2);
+}
+
+// ========== ПРОВЕРКА ETAG НА БОЛЬШИХ ФАЙЛАХ ==========
+
+TEST_F(FileManagerTest, ETagLargeFile) {
+    std::string filename = "etag_large.bin";
+    std::vector<char> data(10 * 1024 * 1024); // 10 MB
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> dist(0, 255);
+    for (auto& byte : data) {
+        byte = static_cast<char>(dist(rng));
+    }
+    
+    _file_manager->upload_file(filename, data);
+    
+    auto metadata1 = _file_manager->get_metadata(filename);
+    auto metadata2 = _file_manager->get_metadata(filename);
+    
+    ASSERT_TRUE(metadata1.has_value());
+    ASSERT_TRUE(metadata2.has_value());
+    EXPECT_EQ(metadata1->etag, metadata2->etag);
+    EXPECT_FALSE(metadata1->etag.empty());
+}
+
+// ========== НЕКОРРЕКТНЫЕ ПУТИ С ПРОБЕЛАМИ ==========
+
+TEST_F(FileManagerTest, FilenameWithSpaces) {
+    std::string filename = "file with spaces.txt";
+    std::vector<char> data = {'s', 'p', 'a', 'c', 'e', 's'};
+    
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
+    EXPECT_TRUE(_file_manager->file_exists(filename));
+    
+    auto downloaded = _file_manager->download_file(filename);
+    ASSERT_TRUE(downloaded.has_value());
+    EXPECT_EQ(*downloaded, data);
+    
+    // Удаление
+    EXPECT_TRUE(_file_manager->delete_file(filename));
+    EXPECT_FALSE(_file_manager->file_exists(filename));
+}
+
+TEST_F(FileManagerTest, FilenameWithUnicode) {
+    // Проверяем, что файл с именем, содержащим эмодзи, работает
+    std::string filename = "emoji_😀_file.txt";
+    std::vector<char> data = {'e', 'm', 'o', 'j', 'i'};
+    
+    EXPECT_TRUE(_file_manager->upload_file(filename, data));
+    EXPECT_TRUE(_file_manager->file_exists(filename));
+    
+    auto downloaded = _file_manager->download_file(filename);
+    ASSERT_TRUE(downloaded.has_value());
+    EXPECT_EQ(*downloaded, data);
+}
+

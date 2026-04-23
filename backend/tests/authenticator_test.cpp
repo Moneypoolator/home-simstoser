@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <random>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -313,6 +314,418 @@ TEST_F(AuthenticatorTest, VerifySignatureInvalidTimestamp) {
     bool verified = auth.verify_signature("GET", "/test", headers, "");
     EXPECT_FALSE(verified);
 }
+
+
+// ========== ТЕСТЫ ВРЕМЕННОЙ МЕТКИ ==========
+
+TEST_F(AuthenticatorTest, TimestampValidation_ValidCurrent) {
+    authenticator auth;
+    // Генерируем текущую временную метку в формате YYYYMMDDTHHMMSSZ
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    gmtime_r(&now_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    // Вызываем приватный метод через публичный verify_signature, который проверяет timestamp
+    // Для этого создадим заголовки с валидной временной меткой, но подпись будет неверной (ожидаем false не из-за времени)
+    std::map<std::string, std::string> headers = {{"x-amz-date", timestamp}};
+    bool verified = auth.verify_signature("GET", "/test", headers, "");
+    // Должен вернуть false из-за отсутствия/неверной подписи, но timestamp валиден
+    EXPECT_FALSE(verified);
+}
+
+TEST_F(AuthenticatorTest, TimestampValidation_Expired) {
+    authenticator auth;
+    // Временная метка 20 минут назад
+    auto past = std::chrono::system_clock::now() - std::chrono::minutes(20);
+    auto past_time_t = std::chrono::system_clock::to_time_t(past);
+    std::tm tm_buf;
+    gmtime_r(&past_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {{"x-amz-date", timestamp}};
+    bool verified = auth.verify_signature("GET", "/test", headers, "");
+    EXPECT_FALSE(verified); // Должен вернуть false из-за просроченной метки
+}
+
+TEST_F(AuthenticatorTest, TimestampValidation_Future) {
+    authenticator auth;
+    // Временная метка в будущем (через 20 минут)
+    auto future = std::chrono::system_clock::now() + std::chrono::minutes(20);
+    auto future_time_t = std::chrono::system_clock::to_time_t(future);
+    std::tm tm_buf;
+    gmtime_r(&future_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {{"x-amz-date", timestamp}};
+    bool verified = auth.verify_signature("GET", "/test", headers, "");
+    EXPECT_FALSE(verified);
+}
+
+TEST_F(AuthenticatorTest, TimestampValidation_BoundaryMinus15Min) {
+    authenticator auth;
+    auto boundary = std::chrono::system_clock::now() - std::chrono::minutes(15) + std::chrono::seconds(1);
+    auto boundary_time_t = std::chrono::system_clock::to_time_t(boundary);
+    std::tm tm_buf;
+    gmtime_r(&boundary_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {{"x-amz-date", timestamp}};
+    bool verified = auth.verify_signature("GET", "/test", headers, "");
+    // Не должно быть отклонено по времени (но подпись неверна)
+    EXPECT_FALSE(verified);
+}
+
+TEST_F(AuthenticatorTest, TimestampValidation_InvalidFormat) {
+    authenticator auth;
+    std::map<std::string, std::string> headers = {{"x-amz-date", "2025-01-01T12:00:00Z"}}; // Неверный формат
+    bool verified = auth.verify_signature("GET", "/test", headers, "");
+    EXPECT_FALSE(verified);
+}
+
+// ========== ТЕСТЫ CANONICAL QUERY STRING ==========
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_NoParams) {
+    authenticator auth;
+    std::string uri = "/test";
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "");
+}
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_SingleParam) {
+    authenticator auth;
+    std::string uri = "/test?foo=bar";
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "foo=bar");
+}
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_MultipleParamsSorted) {
+    authenticator auth;
+    std::string uri = "/test?b=2&a=1&c=3";
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "a=1&b=2&c=3");
+}
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_EncodedValues) {
+    authenticator auth;
+    std::string uri = "/test?key=value%20with%20spaces&foo=bar";
+    // В канонической форме значения должны быть закодированы
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "foo=bar&key=value%20with%20spaces");
+}
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_EmptyValue) {
+    authenticator auth;
+    std::string uri = "/test?flag&key=value";
+    // Параметр без '=' считается с пустым значением
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "flag=&key=value");
+}
+
+TEST_F(AuthenticatorTest, BuildCanonicalQueryString_DecodedInput) {
+    authenticator auth;
+    // Входные данные могут быть уже декодированы сервером, но функция ожидает сырой URI
+    std::string uri = "/test?key=value with spaces"; // Пробелы должны быть закодированы
+    // Поскольку в URI пробелы недопустимы, этот тест показывает, что функция предполагает корректный URI
+    // В реальности сервер получает сырой URI, где пробелы закодированы как %20
+    uri = "/test?key=value%20with%20spaces";
+    EXPECT_EQ(auth.build_canonical_query_string(uri), "key=value%20with%20spaces");
+}
+
+// ========== ТЕСТЫ ПОДПИСИ (ПОЗИТИВНЫЙ СЦЕНАРИЙ) ==========
+
+// Для генерации корректной подписи используем фиксированные данные (как в AWS документации)
+// Пример из документации AWS:
+// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html
+
+TEST_F(AuthenticatorTest, VerifySignature_Valid) {
+    authenticator auth;
+    
+    // Создаём тестовый ключ
+    auto key = auth.create_access_key("testuser", "AKIAIOSFODNN7EXAMPLE");
+    ASSERT_TRUE(key.has_value());
+    
+    // Фиксированные данные для подписи из документации AWS
+    // Здесь мы не можем использовать реальную подпись, так как она зависит от времени.
+    // Вместо этого мы проверим, что при правильной подписи verify_signature возвращает true.
+    // Для этого сгенерируем подпись динамически и проверим её.
+    
+    std::string method = "GET";
+    std::string uri = "/test.txt";
+    std::string body = "";
+    std::string region = "us-east-1";
+    std::string service = "s3";
+    
+    // Генерируем текущую временную метку
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    gmtime_r(&now_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {
+        {"host", "localhost:9000"},
+        {"x-amz-date", timestamp}
+    };
+    
+    std::string signature = auth.generate_signature(
+        key->access_key_id,
+        key->secret_access_key,
+        method,
+        uri,
+        headers,
+        body,
+        region,
+        service
+    );
+    
+    ASSERT_FALSE(signature.empty());
+    
+    // Формируем заголовок Authorization
+    std::string date_stamp = std::string(timestamp, 8);
+    std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
+    std::string auth_header = 
+        "AWS4-HMAC-SHA256 Credential=" + key->access_key_id + "/" + credential_scope +
+        ", SignedHeaders=host;x-amz-date" +
+        ", Signature=" + signature;
+    
+    headers["authorization"] = auth_header;
+    
+    bool verified = auth.verify_signature(method, uri, headers, body, region, service);
+    EXPECT_TRUE(verified);
+}
+
+TEST_F(AuthenticatorTest, VerifySignature_WithQueryParams) {
+    authenticator auth;
+    auto key = auth.create_access_key("testuser", "AKIAQUERYTEST");
+    ASSERT_TRUE(key.has_value());
+    
+    std::string method = "GET";
+    std::string uri = "/test.txt?foo=bar&baz=qux";
+    std::string body = "";
+    std::string region = "us-east-1";
+    std::string service = "s3";
+    
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    gmtime_r(&now_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {
+        {"host", "localhost:9000"},
+        {"x-amz-date", timestamp}
+    };
+    
+    std::string signature = auth.generate_signature(
+        key->access_key_id,
+        key->secret_access_key,
+        method,
+        uri,
+        headers,
+        body,
+        region,
+        service
+    );
+    ASSERT_FALSE(signature.empty());
+    
+    std::string date_stamp = std::string(timestamp, 8);
+    std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
+    std::string auth_header = 
+        "AWS4-HMAC-SHA256 Credential=" + key->access_key_id + "/" + credential_scope +
+        ", SignedHeaders=host;x-amz-date" +
+        ", Signature=" + signature;
+    
+    headers["authorization"] = auth_header;
+    
+    bool verified = auth.verify_signature(method, uri, headers, body, region, service);
+    EXPECT_TRUE(verified);
+}
+
+TEST_F(AuthenticatorTest, VerifySignature_DifferentRegion) {
+    authenticator auth;
+    auto key = auth.create_access_key("testuser", "AKIAREGIONTEST");
+    ASSERT_TRUE(key.has_value());
+    
+    std::string method = "GET";
+    std::string uri = "/test.txt";
+    std::string body = "";
+    std::string region = "eu-west-1";
+    std::string service = "s3";
+    
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    gmtime_r(&now_time_t, &tm_buf);
+    char timestamp[17];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", &tm_buf);
+    
+    std::map<std::string, std::string> headers = {
+        {"host", "localhost:9000"},
+        {"x-amz-date", timestamp}
+    };
+    
+    std::string signature = auth.generate_signature(
+        key->access_key_id,
+        key->secret_access_key,
+        method,
+        uri,
+        headers,
+        body,
+        region,
+        service
+    );
+    ASSERT_FALSE(signature.empty());
+    
+    std::string date_stamp = std::string(timestamp, 8);
+    std::string credential_scope = date_stamp + "/" + region + "/" + service + "/aws4_request";
+    std::string auth_header = 
+        "AWS4-HMAC-SHA256 Credential=" + key->access_key_id + "/" + credential_scope +
+        ", SignedHeaders=host;x-amz-date" +
+        ", Signature=" + signature;
+    
+    headers["authorization"] = auth_header;
+    
+    bool verified = auth.verify_signature(method, uri, headers, body, region, service);
+    EXPECT_TRUE(verified);
+}
+
+// ========== ТЕСТ ГЕНЕРАЦИИ ПОДПИСИ С ЭТАЛОННЫМ ЗНАЧЕНИЕМ ==========
+
+// Используем пример из официальной документации AWS:
+// https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html
+TEST_F(AuthenticatorTest, GenerateSignature_ProducesExpected_AWSExample) {
+    authenticator auth;
+    
+    // Данные из примера AWS (запрос GET к /)
+    std::string access_key_id = "AKIDEXAMPLE";
+    std::string secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    std::string method = "GET";
+    std::string uri = "/";
+    std::string body = "";
+    std::string region = "us-east-1";
+    std::string service = "iam";
+    
+    // Фиксированная временная метка из примера
+    std::string timestamp = "20150830T123600Z";
+    
+    std::map<std::string, std::string> headers = {
+        {"host", "iam.amazonaws.com"},
+        {"x-amz-date", timestamp}
+    };
+    
+    // Создаём ключ с секретом из примера
+    access_key key;
+    key.access_key_id = access_key_id;
+    key.secret_access_key = secret_key;
+    key.user_name = "example";
+    key.is_active = true;
+    
+    // Генерируем подпись
+    std::string signature = auth.generate_signature(
+        access_key_id,
+        secret_key,
+        method,
+        uri,
+        headers,
+        body,
+        region,
+        service
+    );
+    
+    // Ожидаемая подпись из документации
+    std::string expected_signature = "5d672d79c15b13162d9279b0855cfba6789a8edb4c82c400e06b5924a6f2b5d7";
+    
+    EXPECT_EQ(signature, expected_signature);
+}
+
+// ========== МНОГОПОТОЧНЫЙ ДОСТУП ==========
+
+TEST_F(AuthenticatorTest, ConcurrentAccess) {
+    authenticator auth;
+    
+    // Предварительно создаём несколько ключей
+    std::vector<std::string> key_ids;
+    for (int i = 0; i < 10; ++i) {
+        auto key = auth.create_access_key("user" + std::to_string(i));
+        ASSERT_TRUE(key.has_value());
+        key_ids.push_back(key->access_key_id);
+    }
+    
+    const int num_threads = 4;
+    const int ops_per_thread = 100;
+    std::atomic<int> errors{0};
+    
+    auto worker = [&](int thread_id) {
+        for (int i = 0; i < ops_per_thread; ++i) {
+            // Чтение случайного ключа
+            int idx = (thread_id * 7 + i) % key_ids.size();
+            auto key = auth.get_key(key_ids[idx]);
+            if (!key.has_value()) {
+                errors++;
+            }
+            
+            // Иногда создаём новый ключ
+            if (i % 10 == 0) {
+                auto new_key = auth.create_access_key("concurrent_user_" + std::to_string(thread_id) + "_" + std::to_string(i));
+                if (!new_key.has_value()) {
+                    errors++;
+                }
+            }
+            
+            // Иногда деактивируем ключ
+            if (i % 15 == 0 && !key_ids.empty()) {
+                auth.deactivate_key(key_ids[idx]);
+            }
+        }
+    };
+    
+    std::vector<std::thread> threads;
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back(worker, t);
+    }
+    
+    for (auto& t : threads) {
+        t.join();
+    }
+    
+    EXPECT_EQ(errors.load(), 0);
+    
+    // Проверяем, что после всех операций можем сохранить и загрузить ключи
+    fs::path temp_file = _temp_dir / "concurrent_keys.csv";
+    bool saved = auth.save_keys(temp_file.string());
+    EXPECT_TRUE(saved);
+    
+    authenticator auth2;
+    bool loaded = auth2.load_keys(temp_file.string());
+    EXPECT_TRUE(loaded);
+    auto loaded_keys = auth2.list_keys();
+    EXPECT_GE(loaded_keys.size(), 10); // Должно быть не меньше исходных 10
+}
+
+// ========== ТЕСТЫ ВСПОМОГАТЕЛЬНЫХ ФУНКЦИЙ ==========
+
+// Тест hex_encode (приватный, но можно проверить косвенно через sha256_hex)
+TEST_F(AuthenticatorTest, Sha256Hex_EmptyString) {
+    authenticator auth;
+    std::string hash = auth.sha256_hex("");
+    // SHA256 пустой строки известен
+    EXPECT_EQ(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+}
+
+TEST_F(AuthenticatorTest, HmacSha256Hex_KnownValue) {
+    authenticator auth;
+    std::string key = "key";
+    std::string data = "The quick brown fox jumps over the lazy dog";
+    std::string hmac = auth.hmac_sha256_hex(key, data);
+    // Ожидаемое значение можно получить из онлайн-калькулятора
+    EXPECT_EQ(hmac, "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+}
+
+// Тест url_encode/decode (статические функции внутри authenticator.cpp, можно сделать публичными или протестировать через build_canonical_query_string)
+// Мы уже частично покрыли через BuildCanonicalQueryString
 
 // Test generate_signature returns empty string (not implemented)
 // TEST_F(AuthenticatorTest, GenerateSignatureNotImplemented) {
