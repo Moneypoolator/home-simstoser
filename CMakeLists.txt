@@ -69,6 +69,7 @@ set(headers
     backend/include/config.hpp
     backend/include/authorization_header_parser.hpp
     backend/include/compression.hpp
+    backend/include/metrics.hpp
 )
 
 # Executable

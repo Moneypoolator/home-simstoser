@@ -499,6 +499,27 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
             handler.set_authorization_enabled(_authorization_enabled);
             handler.set_cors_config(_cors_config);
             
+            // Special handling for metrics endpoint (should go through regular request handler)
+            if (req.method() == http::verb::get && std::string(req.target()) == "/metrics") {
+                handler.handle_request(
+                    std::move(req),
+                    [&socket, start_time, keep_alive, this](http::response<http::string_body>&& res) {
+                        beast::error_code ec;
+                        set_keep_alive_headers(res, keep_alive);
+                        http::write(socket, res, ec);
+                        if (ec) {
+                            LOG(ERROR) << "Write error: " << ec.message();
+                        } else {
+                            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - start_time);
+                            VLOG(1) << "Request handled in " << duration.count() << "ms";
+                            logging::log_response(static_cast<int>(res.result()));
+                        }
+                    }
+                );
+                continue; // Skip the rest of the request processing for this iteration
+            }
+            
             // === ОСНОВНОЕ ИЗМЕНЕНИЕ: обработка GET-запросов через file_body ===
             if (req.method() == http::verb::get) {
                 try {

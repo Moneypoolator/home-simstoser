@@ -1436,6 +1436,28 @@ void request_handler::apply_compression_if_needed(
             << " bytes using " << compression::content_encoding_header(*algo_opt);
 }
 
+// Metrics endpoint handler
+http::response<http::string_body> request_handler::handle_metrics(
+    const http::request<http::string_body>& req)
+{
+    VLOG(1) << "Handling metrics request";
+    
+    // Get metrics in Prometheus format
+    std::string metrics_data = metrics::MetricsCollector::instance().to_prometheus();
+    
+    // Create response
+    http::response<http::string_body> res{http::status::ok, req.version()};
+    res.set(http::field::server, "s3-server");
+    res.set(http::field::content_type, "text/plain; version=0.0.4");
+    res.body() = metrics_data;
+    res.prepare_payload();
+    
+    // Note: Metrics for this endpoint will be recorded by the caller (handle_request)
+    // via the ScopedTimer and record_request call.
+    
+    return res;
+}
+
 // Explicit template instantiation for the types we use
 template void request_handler::apply_compression_if_needed<http::string_body>(
     http::response<http::string_body>& response,

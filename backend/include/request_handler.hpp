@@ -13,6 +13,7 @@
 #include "server.hpp"  // for cors_config
 #include "logging.hpp"
 #include "compression.hpp"
+#include "metrics.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -48,6 +49,9 @@ public:
     {
         VLOG(1) << "Handling request: " << req.method_string() << " " << req.target();
         
+        // Start timing for metrics
+        metrics::ScopedTimer timer(std::string(req.method_string()), std::string(req.target()));
+        
         http::response<http::string_body> response;
         apply_cors_headers(response, req);
         
@@ -59,6 +63,13 @@ public:
             response.body() = "OK";
             apply_compression_if_needed(response, req);
             response.prepare_payload();
+            // Record metrics for preflight request
+            metrics::MetricsCollector::instance().record_request(
+                std::string(req.method_string()),
+                std::string(req.target()),
+                static_cast<int>(response.result()),
+                timer.elapsed()
+            );
             send(std::move(response));
             return;
         }
@@ -78,6 +89,13 @@ public:
             apply_cors_headers(response, req);
             apply_compression_if_needed(response, req);
             response.prepare_payload();
+            // Record metrics for static file request
+            metrics::MetricsCollector::instance().record_request(
+                std::string(req.method_string()),
+                std::string(req.target()),
+                static_cast<int>(response.result()),
+                timer.elapsed()
+            );
             send(std::move(response));
             return;
         }
@@ -127,13 +145,24 @@ public:
         if (!access_granted) {
             apply_compression_if_needed(response, req);
             response.prepare_payload();
+            // Record metrics for denied request
+            metrics::MetricsCollector::instance().record_request(
+                std::string(req.method_string()),
+                std::string(req.target()),
+                static_cast<int>(response.result()),
+                timer.elapsed()
+            );
             send(std::move(response));
             return;
         }
         
         // Обработка запроса по пути и методу
         try {
-            if (path.find("/upload/initiate") != std::string::npos && req.method() == http::verb::post) {
+            // Metrics endpoint (should be before other GET handlers)
+            if (path == "/metrics" && req.method() == http::verb::get) {
+                response = handle_metrics(req);
+            }
+            else if (path.find("/upload/initiate") != std::string::npos && req.method() == http::verb::post) {
                 response = handle_initiate_upload(req);
             }
             else if (path.find("/upload/part") != std::string::npos && req.method() == http::verb::put) {
@@ -184,6 +213,13 @@ public:
         apply_cors_headers(response, req);
         apply_compression_if_needed(response, req);
         response.prepare_payload();
+        // Record metrics for the request
+        metrics::MetricsCollector::instance().record_request(
+            std::string(req.method_string()),
+            std::string(req.target()),
+            static_cast<int>(response.result()),
+            timer.elapsed()
+        );
         send(std::move(response));
     }
 
@@ -202,6 +238,7 @@ public:
     http::response<http::string_body> handle_delete(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_list(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_get_progress(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_metrics(const http::request<http::string_body>& req);
 
     http::response<http::string_body> create_response(
         http::status status,
