@@ -8,6 +8,7 @@
 #include <vector>
 #include <sstream>
 #include <iomanip>
+#include <glog/logging.h>
 
 namespace metrics {
 
@@ -20,13 +21,14 @@ public:
     }
 
     // Record a request with method, endpoint, and status code
-    void record_request(const std::string& method, const std::string& endpoint, int status_code, 
+    void record_request(const std::string& method, const std::string& endpoint, int status_code,
                         const std::chrono::milliseconds& duration_ms) {
+        VLOG(3) << "Recording metrics for " << method << " " << endpoint << " status " << status_code;
         // Increment total requests
         total_requests_.fetch_add(1, std::memory_order_relaxed);
         
         // Increment request counter for this method
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         request_counts_[method]++;
         
         // Record status code
@@ -42,17 +44,18 @@ public:
         // Record endpoint-specific metrics
         std::string key = method + ":" + endpoint;
         endpoint_counts_[key]++;
+        VLOG(3) << "Metrics recorded";
     }
 
     // Record an error by type
     void record_error(const std::string& error_type) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         error_counts_[error_type]++;
     }
 
     // Record latency in milliseconds
     void record_latency(const std::chrono::milliseconds& duration_ms) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         // Simple histogram buckets: <10ms, <50ms, <100ms, <500ms, <1000ms, <5000ms, >=5000ms
         if (duration_ms.count() < 10) latency_buckets_[0]++;
         else if (duration_ms.count() < 50) latency_buckets_[1]++;
@@ -80,7 +83,7 @@ public:
         out << "# HELP s3_server_requests_by_method_total Total requests by HTTP method\n";
         out << "# TYPE s3_server_requests_by_method_total counter\n";
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             for (const auto& [method, count] : request_counts_) {
                 out << "s3_server_requests_by_method_total{method=\"" << method << "\"} " << count << "\n";
             }
@@ -97,7 +100,7 @@ public:
         out << "# HELP s3_server_errors_by_type_total Total errors by error type\n";
         out << "# TYPE s3_server_errors_by_type_total counter\n";
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             for (const auto& [error_type, count] : error_counts_) {
                 out << "s3_server_errors_by_type_total{error_type=\"" << error_type << "\"} " << count << "\n";
             }
@@ -106,7 +109,7 @@ public:
         out << "# HELP s3_server_request_duration_seconds Histogram of request durations in seconds\n";
         out << "# TYPE s3_server_request_duration_seconds histogram\n";
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             const std::vector<double> bucket_upper_bounds = {0.01, 0.05, 0.1, 0.5, 1.0, 5.0};
             uint64_t cumulative = 0;
             for (size_t i = 0; i < bucket_upper_bounds.size(); ++i) {
@@ -163,7 +166,7 @@ private:
     std::atomic<uint64_t> server_errors_;
     std::atomic<int> active_sessions_;
     
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
     std::map<std::string, uint64_t> request_counts_;
     std::map<std::string, uint64_t> error_counts_;
     std::map<std::string, uint64_t> endpoint_counts_;

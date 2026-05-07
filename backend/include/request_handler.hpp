@@ -210,16 +210,21 @@ public:
             );
         }
         
+        VLOG(3) << "Applying CORS headers";
         apply_cors_headers(response, req);
+        VLOG(3) << "Applying compression if needed";
         apply_compression_if_needed(response, req);
+        VLOG(3) << "Preparing payload";
         response.prepare_payload();
         // Record metrics for the request
+        VLOG(3) << "Recording metrics";
         metrics::MetricsCollector::instance().record_request(
             std::string(req.method_string()),
             std::string(req.target()),
             static_cast<int>(response.result()),
             timer.elapsed()
         );
+        VLOG(3) << "Sending response";
         send(std::move(response));
     }
 

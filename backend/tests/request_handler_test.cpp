@@ -746,7 +746,7 @@ TEST_F(RequestHandlerAuthTest, AuthenticateRequest_ValidSignature) {
     
     EXPECT_TRUE(result.authenticated);
     EXPECT_TRUE(result.user_id.has_value());
-    EXPECT_EQ(*result.user_id, "AKIATESTKEY");
+    EXPECT_EQ(*result.user_id, "testuser");
     EXPECT_EQ(result.username, "testuser");
 }
 

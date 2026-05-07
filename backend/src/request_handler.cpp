@@ -72,11 +72,12 @@ request_handler::auth_result request_handler::authenticate_request(
     );
     
     if (!valid) {
-        LOG(WARNING) << "Authentication failed: " 
+        LOG(WARNING) << "Authentication failed: "
                      << req.method_string() << " " << req.target();
         return {false, std::nullopt, std::nullopt};
     }
     
+    LOG(INFO) << "Signature verification succeeded, extracting access key";
     // Извлекаем user_id из заголовка Authorization
     auto auth_it = headers.find("authorization");
     if (auth_it != headers.end()) {
@@ -85,13 +86,29 @@ request_handler::auth_result request_handler::authenticate_request(
         auto access_key_id_opt = authorization_header_parser::extract_access_key_id(auth_header);
         
         if (access_key_id_opt) {
+            LOG(INFO) << "Extracted access key ID: " << *access_key_id_opt;
             // Получаем ключ доступа
             auto access_key_opt = _authenticator->get_key(*access_key_id_opt);
             if (access_key_opt) {
                 VLOG(2) << "Authenticated with access key: " << *access_key_id_opt;
-                return {true, *access_key_id_opt, access_key_opt->user_name};
+                std::string username = access_key_opt->user_name;
+                std::string user_id = username; // default
+                if (_authorizer) {
+                    auto user_opt = _authorizer->get_user_by_name(username);
+                    if (user_opt) {
+                        user_id = user_opt->user_id;
+                    }
+                }
+                LOG(INFO) << "Authentication successful, user_id=" << user_id << ", username=" << username;
+                return {true, user_id, username};
+            } else {
+                LOG(WARNING) << "Access key not found in authenticator";
             }
+        } else {
+            LOG(WARNING) << "Failed to extract access key ID from Authorization header";
         }
+    } else {
+        LOG(WARNING) << "Authorization header missing";
     }
     
     LOG(WARNING) << "Authentication successful but access key not found";
@@ -113,6 +130,7 @@ bool request_handler::authorize_request(
     // Извлекаем путь к ресурсу
     std::string resource_path = extract_resource_path(req);
     
+    VLOG(2) << "Checking access for user " << user_id << " to resource " << resource_path;
     // Проверяем доступ
     bool authorized = _authorizer->check_access(
         user_id,
@@ -546,13 +564,18 @@ http::response<http::string_body> request_handler::handle_get(
         body.reserve(static_cast<size_t>(file_size));
         constexpr size_t buffer_size = 1024 * 1024;
         std::vector<char> buffer(buffer_size);
+        VLOG(2) << "Reading whole file: " << full_path << " size " << file_size;
+        int iteration = 0;
         while (file) {
+            iteration++;
+            VLOG(3) << "Reading iteration " << iteration;
             file.read(buffer.data(), buffer_size);
             std::streamsize bytes = file.gcount();
-            if (bytes > 0) {
-                body.append(buffer.data(), static_cast<size_t>(bytes));
-            }
+            VLOG(3) << "Read " << bytes << " bytes";
+            if (bytes == 0) break;
+            body.append(buffer.data(), static_cast<size_t>(bytes));
         }
+        VLOG(2) << "Finished reading after " << iteration << " iterations";
         file.close();
     }
     
