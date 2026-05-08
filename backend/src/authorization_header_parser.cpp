@@ -12,6 +12,14 @@ namespace {
         size_t last = str.find_last_not_of(" \t\r\n");
         return str.substr(first, last - first + 1);
     }
+
+    // Helper function to strip surrounding double quotes
+    string strip_quotes(const string& str) {
+        if (str.length() >= 2 && str.front() == '"' && str.back() == '"') {
+            return str.substr(1, str.length() - 2);
+        }
+        return str;
+    }
 }
 
 optional<authorization_header_parser::parsed_auth> 
@@ -110,5 +118,5 @@ optional<string> authorization_header_parser::extract_param(const string& auth_h
     }
     
     string param_value = auth_header.substr(start, end - start);
-    return trim(param_value);
+    return strip_quotes(trim(param_value));
 }
