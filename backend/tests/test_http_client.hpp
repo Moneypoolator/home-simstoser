@@ -1,7 +1,9 @@
 #pragma once
+
 #include <string>
 #include <vector>
-#include <optional>
+#include <map>
+#include <limits>
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
 
@@ -65,7 +67,13 @@ private:
             
             beast::flat_buffer buffer;
             http::response<http::string_body> res;
-            http::read(stream, buffer, res);
+            
+            // Create a parser with increased body limit to support large files
+            http::response_parser<http::string_body> parser;
+            parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+            
+            http::read(stream, buffer, parser);
+            res = parser.release();
             
             stream.socket().shutdown(tcp::socket::shutdown_both);
             
