@@ -21,7 +21,15 @@ protected:
         _port = 9000 + (std::hash<std::thread::id>{}(std::this_thread::get_id()) % 1000);
         
         // Создаем и запускаем сервер в отдельном потоке
-        _server = std::make_unique<s3_server>("127.0.0.1", _port, _temp_dir.string());
+        rate_limiter_config rl_cfg;
+        rl_cfg.max_requests_per_minute = 1000;
+        rl_cfg.max_burst_size = 100;
+        rl_cfg.max_connections_per_ip = 100;
+        rl_cfg.max_connection_rate = 1000;
+        rl_cfg.enable_ddos_protection = false;
+        _server = std::make_unique<s3_server>("127.0.0.1", _port, _temp_dir.string(),
+            "", "", "", std::nullopt, std::nullopt, upload_limits_config(),
+            keep_alive_config(), rl_cfg);
         
         std::thread server_thread([this]() {
             _server->run(1); // 1 поток для тестов
@@ -917,13 +925,14 @@ TEST_F(ServerIntegrationTest, KeepAliveConnectionCloseHeader) {
     EXPECT_EQ(res[http::field::connection], "close");
     
     // После close соединение должно быть закрыто сервером
-    // Попытка отправить ещё один запрос должна привести к ошибке
-    try {
-        http::write(stream, req);
-        FAIL() << "Expected write to fail after connection close";
-    } catch (const std::exception&) {
-        // Ожидаемо
-    }
+    // Проверяем, что соединение закрыто (чтение должно вернуть end_of_stream)
+    beast::error_code ec;
+    stream.expires_after(std::chrono::milliseconds(100));
+    beast::flat_buffer buffer2;
+    http::response<http::string_body> res2;
+    http::read(stream, buffer2, res2, ec);
+    EXPECT_TRUE(ec == beast::http::error::end_of_stream || ec == asio::error::eof)
+        << "Expected connection close, got: " << ec.message();
 }
 
 // ========== RATE LIMITING ТЕСТЫ ==========
