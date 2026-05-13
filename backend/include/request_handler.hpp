@@ -105,8 +105,9 @@ public:
         VLOG(2) << "Required permission: " << (required_perm ? permission_to_string(*required_perm) : "none");
         
         // Аутентификация
+        LOG(INFO) << "handle_request: calling authenticate_request for path=" << path;
         auth_result auth_result = authenticate_request(req);
-        VLOG(2) << "Authentication result: authenticated=" << auth_result.authenticated << ", user_id=" << (auth_result.user_id ? *auth_result.user_id : "none");
+        LOG(INFO) << "Authentication result: authenticated=" << auth_result.authenticated << ", user_id=" << (auth_result.user_id ? *auth_result.user_id : "none");
         
         // Авторизация или публичный доступ
         bool access_granted = false;
@@ -229,8 +230,14 @@ public:
     }
 
     // Включение/выключение проверок
-    void set_auth_enabled(bool enabled) { _auth_enabled = enabled; }
-    void set_authorization_enabled(bool enabled) { _authorization_enabled = enabled; }
+    void set_auth_enabled(bool enabled) {
+        LOG(INFO) << "request_handler::set_auth_enabled(" << enabled << ")";
+        _auth_enabled = enabled;
+    }
+    void set_authorization_enabled(bool enabled) {
+        LOG(INFO) << "request_handler::set_authorization_enabled(" << enabled << ")";
+        _authorization_enabled = enabled;
+    }
     
     // Настройка CORS
     void set_cors_config(const std::optional<s3_server::cors_config>& config) { _cors_config = config; }

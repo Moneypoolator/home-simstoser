@@ -50,6 +50,7 @@ request_handler::request_handler(
 request_handler::auth_result request_handler::authenticate_request(
     const http::request<http::string_body>& req) const
 {
+    LOG(INFO) << "authenticate_request: _auth_enabled=" << _auth_enabled << ", _authenticator=" << (_authenticator ? "present" : "null");
     if (!_auth_enabled || !_authenticator) {
         VLOG(2) << "Authentication disabled, skipping";
         return {false, std::nullopt, std::nullopt};
@@ -481,7 +482,22 @@ http::response<http::string_body> request_handler::handle_get(
         if (clean_path.compare(0, 4, "api/") == 0) {
             clean_path = clean_path.substr(4);
         }
+        LOG(INFO) << "handle_get: clean_path='" << clean_path << "'";
         if (clean_path == "list") {
+            // Check authentication if enabled
+            if (_auth_enabled) {
+                LOG(INFO) << "Authentication enabled, checking";
+                auth_result auth = authenticate_request(req);
+                if (!auth.authenticated) {
+                    LOG(INFO) << "Authentication failed for /list, returning 401";
+                    return create_error_response(
+                        http::status::unauthorized,
+                        "InvalidSignature",
+                        "Signature validation failed"
+                    );
+                }
+            }
+            LOG(INFO) << "Authentication passed for /list, proceeding";
             return handle_list(req);
         }
         return create_response(http::status::bad_request, R"({"error": "Filename required"})");
@@ -1126,6 +1142,7 @@ http::response<http::string_body> request_handler::create_error_response(
     res.set(http::field::content_type, "application/xml");
     res.set(http::field::access_control_allow_origin, "*");
     res.body() = error_xml;
+    res.prepare_payload();
     
     return res;
 }
