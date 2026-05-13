@@ -466,6 +466,7 @@ void request_handler::handle_request(
 http::response<http::string_body> request_handler::handle_get(
     const http::request<http::string_body>& req)
 {
+    LOG(INFO) << "handle_get called with target: " << req.target();
     std::string filename = get_filename_from_path(std::string(req.target()));
     if (filename.empty()) {
         // Check if this is a /list API request
@@ -484,10 +485,12 @@ http::response<http::string_body> request_handler::handle_get(
         }
         LOG(INFO) << "handle_get: clean_path='" << clean_path << "'";
         if (clean_path == "list") {
+            LOG(INFO) << "handle_get: entering list branch";
             // Check authentication if enabled
+            auth_result auth;
             if (_auth_enabled) {
                 LOG(INFO) << "Authentication enabled, checking";
-                auth_result auth = authenticate_request(req);
+                auth = authenticate_request(req);
                 if (!auth.authenticated) {
                     LOG(INFO) << "Authentication failed for /list, returning 401";
                     return create_error_response(
@@ -496,8 +499,43 @@ http::response<http::string_body> request_handler::handle_get(
                         "Signature validation failed"
                     );
                 }
+                LOG(INFO) << "Authentication passed for /list";
+            } else {
+                auth.authenticated = false;
+                auth.user_id = std::nullopt;
+                auth.username = std::nullopt;
             }
-            LOG(INFO) << "Authentication passed for /list, proceeding";
+
+            // Check authorization if enabled
+            LOG(INFO) << "handle_get: _authorization_enabled=" << _authorization_enabled << ", _authorizer=" << (_authorizer ? "present" : "null");
+            if (_authorization_enabled && _authorizer) {
+                auto required_perm = permission_type::LIST;
+                LOG(INFO) << "handle_get: checking authorization for user " << (auth.user_id ? *auth.user_id : "none");
+                if (auth.authenticated && auth.user_id) {
+                    if (!authorize_request(*auth.user_id, req, required_perm)) {
+                        LOG(INFO) << "Authorization failed for /list, returning 403";
+                        return create_error_response(
+                            http::status::forbidden,
+                            "AccessDenied",
+                            "Access denied"
+                        );
+                    }
+                } else {
+                    // No authenticated user, check public access
+                    if (!check_public_access(req, required_perm)) {
+                        LOG(INFO) << "Public access denied for /list, returning 401";
+                        return create_error_response(
+                            http::status::unauthorized,
+                            "InvalidSignature",
+                            "Signature validation failed"
+                        );
+                    }
+                }
+            } else {
+                LOG(INFO) << "handle_get: authorization not enabled or authorizer missing";
+            }
+
+            LOG(INFO) << "Authentication and authorization passed for /list, proceeding";
             return handle_list(req);
         }
         return create_response(http::status::bad_request, R"({"error": "Filename required"})");
