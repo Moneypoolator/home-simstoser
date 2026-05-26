@@ -8,6 +8,7 @@ import { UsersPage } from './pages/UsersPage';
 import { KeysPage } from './pages/KeysPage';
 import { PoliciesPage } from './pages/PoliciesPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { MonitoringPage } from './pages/MonitoringPage';
 import { authService } from './services/auth';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -68,6 +69,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/monitoring"
+            element={
+              <ProtectedRoute>
+                <MonitoringPage />
               </ProtectedRoute>
             }
           />

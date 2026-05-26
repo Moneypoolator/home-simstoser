@@ -471,6 +471,7 @@ int main(int argc, char* argv[])
     if (!enable_auth) {
         keys_file = "";
         users_file = "";
+        acls_file = "";
     }
 
     // Установка обработчика сигналов

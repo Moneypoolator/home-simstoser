@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Folder, Users, Key, Shield, Settings } from 'lucide-react';
+import { Home, Folder, Users, Key, Shield, Settings, Activity } from 'lucide-react';
 
 const navigation = [
   { name: 'Панель управления', href: '/', icon: Home },
@@ -8,6 +8,7 @@ const navigation = [
   { name: 'Пользователи', href: '/users', icon: Users },
   { name: 'Ключи доступа', href: '/keys', icon: Key },
   { name: 'Политики', href: '/policies', icon: Shield },
+  { name: 'Мониторинг', href: '/monitoring', icon: Activity },
   { name: 'Настройки', href: '/settings', icon: Settings },
 ];
 
