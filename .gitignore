@@ -6,3 +6,5 @@
 /rest-api/keys-generation/__pycache__
 /node_modules
 /vcpkg_installed
+/GUI/bin
+/GUI/obj
