@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "boost",
+    "glog",
+    "gtest",
+    "openssl",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "216bb6975d5cccd35c27a14fb39acec3ae0e8285"
+}

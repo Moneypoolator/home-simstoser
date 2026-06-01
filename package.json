@@ -1,0 +1,22 @@
+{
+  "name": "home-simstoser",
+  "version": "1.0.0",
+  "description": "A lightweight, S3-compatible file storage server for personal use with a modern web interface.",
+  "private": true,
+  "scripts": {
+    "build": "./build-run.sh",
+    "test": "./run_tests.sh",
+    "start": "./build-run.sh",
+    "frontend": "cd web && npm run dev",
+    "backend": "cd build && ./s3_server",
+    "install-frontend": "cd web && npm install",
+    "clean": "rm -rf build node_modules web/node_modules web/dist"
+  },
+  "dependencies": {
+    "aws4": "^1.13.2"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
