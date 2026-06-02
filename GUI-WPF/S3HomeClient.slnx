@@ -1,8 +1,8 @@
 <Solution>
   <Configurations>
-    <Platform Name="x86" />
+    <Platform Name="AnyCPU" />
   </Configurations>
   <Project Path="S3HomeClient.csproj">
-    <Platform Project="x86" />
+    <Platform Project="AnyCPU" />
   </Project>
 </Solution>

@@ -78,7 +78,13 @@ namespace S3StorageClient.Views
                         ? fileInfo.Length - (i - 1) * ChunkSize
                         : ChunkSize;
                     var buffer = new byte[partSize];
-                    await stream.ReadAsync(buffer);
+                    var bytesRead = 0;
+                    while (bytesRead < buffer.Length)
+                    {
+                        var read = await stream.ReadAsync(buffer.AsMemory(bytesRead, buffer.Length - bytesRead));
+                        if (read == 0) break;
+                        bytesRead += read;
+                    }
 
                     lblStatus.Text = $"Uploading part {i}/{numParts}...";
                     UpdatePartStatus(i, "Uploading");
