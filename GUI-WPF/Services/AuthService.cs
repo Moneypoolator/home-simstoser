@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using S3StorageClient.Models;
 
 namespace S3StorageClient.Services
