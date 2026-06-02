@@ -1,0 +1,102 @@
+<Window x:Class="S3StorageClient.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="S3 Storage Client"
+        WindowState="Maximized"
+        MinWidth="1024" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#F9FAFB">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Sidebar -->
+        <Border Grid.Column="0" Background="#1F2937">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="60" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Logo -->
+                <Border Grid.Row="0" Background="#1F2937">
+                    <TextBlock Text="S3 Storage"
+                             FontSize="18" FontWeight="Bold"
+                             Foreground="White"
+                             TextAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+
+                <!-- Navigation buttons -->
+                <StackPanel Grid.Row="1" Margin="10,10,10,0">
+                    <Button x:Name="btnDashboard" Content="  Dashboard"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnDashboard_Click" />
+                    <Button x:Name="btnFiles" Content="  Files"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnFiles_Click" />
+                    <Button x:Name="btnUsers" Content="  Users"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnUsers_Click" />
+                    <Button x:Name="btnKeys" Content="  Access Keys"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnKeys_Click" />
+                    <Button x:Name="btnPolicies" Content="  Policies"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnPolicies_Click" />
+                    <Button x:Name="btnMonitoring" Content="  Monitoring"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnMonitoring_Click" />
+                    <Button x:Name="btnSettings" Content="  Settings"
+                            Style="{StaticResource NavButtonStyle}"
+                            Click="BtnSettings_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main content area -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="56" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Border Grid.Row="0" Background="White">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="lblTitle" Text="Dashboard"
+                             FontSize="18" FontWeight="Bold"
+                             Foreground="#1F2937"
+                             VerticalAlignment="Center"
+                             Margin="20,0,0,0" />
+
+                    <TextBlock x:Name="lblUsername"
+                             Grid.Column="1"
+                             Text="{x:Null}"
+                             FontSize="12"
+                             Foreground="#6B7280"
+                             VerticalAlignment="Center"
+                             Margin="0,0,10,0" />
+
+                    <Button Grid.Column="2"
+                           Content="Sign Out"
+                           Style="{StaticResource SecondaryButtonStyle}"
+                           Height="30" Width="80"
+                           Margin="0,0,20,0"
+                           Click="BtnLogout_Click" />
+                </Grid>
+            </Border>
+
+            <!-- Content area (switches between pages) -->
+            <ContentControl x:Name="contentArea" Grid.Row="1" />
+        </Grid>
+    </Grid>
+</Window>

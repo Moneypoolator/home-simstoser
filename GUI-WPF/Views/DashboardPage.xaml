@@ -1,0 +1,48 @@
+<UserControl x:Class="S3StorageClient.Views.DashboardPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#F9FAFB">
+    <ScrollViewer Padding="10">
+        <StackPanel>
+            <!-- Stats cards -->
+            <StackPanel x:Name="statsPanel" Orientation="Horizontal" Margin="0,0,0,20" Height="100" />
+
+            <!-- Quick Upload -->
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Quick Upload" FontSize="14" FontWeight="Bold" Margin="0,0,0,10" />
+                    <Button Content="Upload Files"
+                           Style="{StaticResource PrimaryButtonStyle}"
+                           Width="150" Height="35"
+                           HorizontalAlignment="Left"
+                           Click="BtnUpload_Click" />
+                </StackPanel>
+            </Border>
+
+            <!-- Recent Files -->
+            <Border Style="{StaticResource SectionCardStyle}" Height="300">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Recent Files" FontSize="14" FontWeight="Bold" Margin="0,0,0,10" />
+                    <ListView x:Name="recentFilesList" Grid.Row="1"
+                             BorderBrush="#E5E7EB"
+                             BorderThickness="1">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Name" Width="300" DisplayMemberBinding="{Binding Name}" />
+                                <GridViewColumn Header="Size" Width="100" DisplayMemberBinding="{Binding Size}" />
+                                <GridViewColumn Header="Modified" Width="180" DisplayMemberBinding="{Binding LastModified}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <!-- Status -->
+            <TextBlock x:Name="lblStatus" Style="{StaticResource StatusBarStyle}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

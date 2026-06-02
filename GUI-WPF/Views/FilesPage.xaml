@@ -1,0 +1,51 @@
+<UserControl x:Class="S3StorageClient.Views.FilesPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#F9FAFB">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="25" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="0" Background="White" Padding="10">
+            <Grid>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Upload" Style="{StaticResource PrimaryButtonStyle}" Width="80" Height="30" Margin="0,0,5,0" Click="BtnUpload_Click" />
+                    <Button Content="Download" Style="{StaticResource PrimaryButtonStyle}" Width="80" Height="30" Margin="0,0,5,0" Click="BtnDownload_Click" />
+                    <Button Content="Delete" Style="{StaticResource PrimaryButtonStyle}" Width="80" Height="30" Margin="0,0,5,0" Click="BtnDelete_Click" />
+                    <Button Content="Multipart Upload" Style="{StaticResource PrimaryButtonStyle}" Width="130" Height="30" Margin="0,0,5,0" Click="BtnMultipart_Click" />
+                    <Button Content="Refresh" Style="{StaticResource PrimaryButtonStyle}" Width="80" Height="30" Click="BtnRefresh_Click" />
+                </StackPanel>
+                <TextBox x:Name="txtSearch"
+                        HorizontalAlignment="Right"
+                        Width="200" Height="30"
+                        FontSize="13"
+                        Padding="6,4"
+                        BorderBrush="#D1D5DB"
+                        BorderThickness="1"
+                        TextChanged="TxtSearch_TextChanged" />
+            </Grid>
+        </Border>
+
+        <!-- Files list -->
+        <ListView x:Name="filesList" Grid.Row="1"
+                 BorderBrush="#E5E7EB"
+                 BorderThickness="1"
+                 SelectionMode="Single">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Name" Width="350" DisplayMemberBinding="{Binding Name}" />
+                    <GridViewColumn Header="Size" Width="100" DisplayMemberBinding="{Binding Size}" />
+                    <GridViewColumn Header="Last Modified" Width="180" DisplayMemberBinding="{Binding LastModified}" />
+                    <GridViewColumn Header="ETag" Width="200" DisplayMemberBinding="{Binding Etag}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- Status bar -->
+        <TextBlock x:Name="lblStatus" Grid.Row="2" Style="{StaticResource StatusBarStyle}" />
+    </Grid>
+</UserControl>

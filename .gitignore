@@ -8,3 +8,5 @@
 /vcpkg_installed
 /GUI/bin
 /GUI/obj
+/GUI-WPF/bin
+/GUI-WPF/obj

@@ -1,0 +1,40 @@
+<UserControl x:Class="S3StorageClient.Views.PoliciesPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#F9FAFB">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="25" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="0" Background="White" Padding="10">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Create Policy" Style="{StaticResource PrimaryButtonStyle}" Width="110" Height="30" Margin="0,0,5,0" Click="BtnCreate_Click" />
+                <Button Content="Edit" Style="{StaticResource PrimaryButtonStyle}" Width="90" Height="30" Margin="0,0,5,0" Click="BtnEdit_Click" />
+                <Button Content="Delete" Style="{StaticResource PrimaryButtonStyle}" Width="90" Height="30" Margin="0,0,5,0" Click="BtnDelete_Click" />
+                <Button Content="Refresh" Style="{StaticResource PrimaryButtonStyle}" Width="90" Height="30" Click="BtnRefresh_Click" />
+            </StackPanel>
+        </Border>
+
+        <!-- Policies list -->
+        <ListView x:Name="policiesList" Grid.Row="1"
+                 BorderBrush="#E5E7EB"
+                 BorderThickness="1"
+                 SelectionMode="Single">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Name" Width="200" DisplayMemberBinding="{Binding Name}" />
+                    <GridViewColumn Header="Description" Width="300" DisplayMemberBinding="{Binding Description}" />
+                    <GridViewColumn Header="Permissions" Width="200" DisplayMemberBinding="{Binding PermissionsText}" />
+                    <GridViewColumn Header="Created" Width="150" DisplayMemberBinding="{Binding CreatedAt}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- Status bar -->
+        <TextBlock x:Name="lblStatus" Grid.Row="2" Style="{StaticResource StatusBarStyle}" />
+    </Grid>
+</UserControl>
