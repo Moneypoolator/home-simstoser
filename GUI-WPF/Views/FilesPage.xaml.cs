@@ -77,7 +77,12 @@ namespace S3StorageClient.Views
                     try
                     {
                         var filename = System.IO.Path.GetFileName(filePath);
-                        var data = await System.IO.File.ReadAllBytesAsync(filePath);
+                        byte[] data;
+                        using (var fs = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, 4096, true))
+                        {
+                            data = new byte[fs.Length];
+                            await fs.ReadAsync(data, 0, data.Length);
+                        }
                         await App.ApiService.UploadFileAsync(filename, data);
                     }
                     catch (Exception ex)
@@ -109,7 +114,10 @@ namespace S3StorageClient.Views
                 {
                     lblStatus.Text = $"Downloading {fileMeta.Name}...";
                     var data = await App.ApiService.DownloadFileAsync(fileMeta.Name);
-                    await System.IO.File.WriteAllBytesAsync(sfd.FileName, data);
+                    using (var fs = new System.IO.FileStream(sfd.FileName, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true))
+                    {
+                        await fs.WriteAsync(data, 0, data.Length);
+                    }
                     lblStatus.Text = $"Downloaded {fileMeta.Name}";
                     MessageBox.Show("File downloaded successfully", "Success",
                         MessageBoxButton.OK, MessageBoxImage.Information);

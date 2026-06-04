@@ -81,7 +81,7 @@ namespace S3StorageClient.Views
                     var bytesRead = 0;
                     while (bytesRead < buffer.Length)
                     {
-                        var read = await stream.ReadAsync(buffer.AsMemory(bytesRead, buffer.Length - bytesRead));
+                        var read = await stream.ReadAsync(buffer, bytesRead, buffer.Length - bytesRead);
                         if (read == 0) break;
                         bytesRead += read;
                     }
