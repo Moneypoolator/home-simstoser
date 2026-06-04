@@ -13,10 +13,10 @@ namespace S3StorageClient.Services
             _apiService = apiService;
         }
 
-        public string? AccessKeyId { get; private set; }
-        public string? SecretAccessKey { get; private set; }
-        public string? UserId { get; private set; }
-        public string? Username { get; private set; }
+        public string AccessKeyId { get; private set; }
+        public string SecretAccessKey { get; private set; }
+        public string UserId { get; private set; }
+        public string Username { get; private set; }
 
         public bool IsAuthenticated => !string.IsNullOrEmpty(AccessKeyId);
 

@@ -8,10 +8,10 @@ namespace S3StorageClient.Views
 {
     public partial class PolicyFormWindow : Window
     {
-        private readonly AccessPolicy? _existingPolicy;
+        private readonly AccessPolicy _existingPolicy;
         private readonly List<PermissionRowControl> _permissionRows = new();
 
-        public PolicyFormWindow(AccessPolicy? existingPolicy = null)
+        public PolicyFormWindow(AccessPolicy existingPolicy = null)
         {
             _existingPolicy = existingPolicy;
             InitializeComponent();
@@ -125,7 +125,7 @@ namespace S3StorageClient.Views
             public string ResourcePattern => txtPattern.Text.Trim();
             public bool Allow => chkAllow.IsChecked ?? true;
 
-            public event EventHandler? RemoveRequested;
+            public event EventHandler RemoveRequested;
 
             public PermissionRowControl(string type, string pattern, bool allow)
             {

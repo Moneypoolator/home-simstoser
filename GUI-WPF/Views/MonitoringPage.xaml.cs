@@ -10,8 +10,8 @@ namespace S3StorageClient.Views
     public partial class MonitoringPage : UserControl
     {
         private readonly DispatcherTimer _refreshTimer;
-        private ServerMetrics? _metrics;
-        private SystemStatus? _systemStatus;
+        private ServerMetrics _metrics;
+        private SystemStatus _systemStatus;
 
         public MonitoringPage()
         {

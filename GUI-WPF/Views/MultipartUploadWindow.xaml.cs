@@ -9,8 +9,8 @@ namespace S3StorageClient.Views
 {
     public partial class MultipartUploadWindow : Window
     {
-        private string? _selectedFilePath;
-        private string? _uploadId;
+        private string _selectedFilePath;
+        private string _uploadId;
         private const int ChunkSize = 5 * 1024 * 1024; // 5MB
         private readonly ObservableCollection<PartItem> _parts = new();
 

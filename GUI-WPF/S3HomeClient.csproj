@@ -9,6 +9,7 @@
     <FileAlignment>512</FileAlignment>
     <UseWPF>true</UseWPF>
     <RootNamespace>S3StorageClient</RootNamespace>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>

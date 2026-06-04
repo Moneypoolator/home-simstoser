@@ -13,8 +13,8 @@ namespace S3StorageClient.Services
     {
         private readonly HttpClient _httpClient;
         private string _baseUrl = "http://localhost:9000";
-        private string? _accessKeyId;
-        private string? _secretAccessKey;
+        private string _accessKeyId;
+        private string _secretAccessKey;
 
         public ApiService()
         {

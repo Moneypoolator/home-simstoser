@@ -58,7 +58,7 @@ namespace S3StorageClient.Models
         public string AccessKeyId { get; set; } = string.Empty;
 
         [JsonProperty("secret_access_key")]
-        public string? SecretAccessKey { get; set; }
+        public string SecretAccessKey { get; set; }
 
         [JsonProperty("user_name")]
         public string UserName { get; set; } = string.Empty;
@@ -97,7 +97,7 @@ namespace S3StorageClient.Models
         public string CreatedAt { get; set; } = string.Empty;
 
         [JsonProperty("last_login")]
-        public string? LastLogin { get; set; }
+        public string LastLogin { get; set; }
     }
 
     public class UserListResponse
@@ -301,7 +301,7 @@ namespace S3StorageClient.Models
         public string Error { get; set; } = string.Empty;
 
         [JsonProperty("message")]
-        public string? Message { get; set; }
+        public string Message { get; set; }
     }
 
     public class ApiResponse<T>
@@ -310,12 +310,12 @@ namespace S3StorageClient.Models
         public bool Success { get; set; }
 
         [JsonProperty("data")]
-        public T? Data { get; set; }
+        public T Data { get; set; }
 
         [JsonProperty("error")]
-        public string? Error { get; set; }
+        public string Error { get; set; }
 
         [JsonProperty("message")]
-        public string? Message { get; set; }
+        public string Message { get; set; }
     }
 }

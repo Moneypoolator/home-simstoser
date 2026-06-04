@@ -128,7 +128,7 @@ namespace S3StorageClient.Views
             };
         }
 
-        private static string FormatDate(string? dateString)
+        private static string FormatDate(string dateString)
         {
             if (string.IsNullOrEmpty(dateString)) return "Never";
             if (DateTime.TryParse(dateString, out var dt))
