@@ -10,3 +10,8 @@
 /GUI/obj
 /GUI-WPF/bin
 /GUI-WPF/obj
+/GUI/.vs
+/GUI-WPF/.vs
+/.vs
+/GUI-WPF/packages
+/out
