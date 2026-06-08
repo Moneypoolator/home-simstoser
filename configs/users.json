@@ -1,0 +1,22 @@
+[
+    {
+        "username": "admin",
+        "email": "admin@example.com",
+        "role": "ADMIN",
+        "is_active": true,
+        "groups": ["administrators"]
+    },
+    {
+        "username": "john_doe",
+        "email": "john@example.com",
+        "role": "CONTRIBUTOR",
+        "is_active": true,
+        "groups": ["users"]
+    },
+    {
+        "username": "guest",
+        "role": "GUEST",
+        "is_active": true,
+        "groups": ["guests"]
+    }
+]

@@ -1,0 +1,28 @@
+[
+    {
+        "resource_path": "/public",
+        "is_public": true,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {}
+    },
+    {
+        "resource_path": "/shared",
+        "is_public": false,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {
+            "users": ["READ", "WRITE", "LIST"],
+            "guests": ["READ", "LIST"]
+        }
+    },
+    {
+        "resource_path": "/admin-only",
+        "is_public": false,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {
+            "administrators": ["READ", "WRITE", "DELETE", "LIST", "MANAGE_ACL"]
+        }
+    }
+]

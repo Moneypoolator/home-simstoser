@@ -1,0 +1,42 @@
+{
+  "address": "127.0.0.1",
+  "port": 9998,
+  "storage_path": "./test_storage",
+  "keys_file": "",
+  "users_file": "",
+  "enable_auth": false,
+  "enable_ssl": false,
+  "use_letsencrypt": false,
+  "letsencrypt_dir": "",
+  "ssl": null,
+  "cors": null,
+  "upload_limits": {
+    "max_file_size": 1000000,
+    "max_part_size": 500000,
+    "max_parts_per_upload": 5,
+    "max_temp_storage_total": 10000000
+  },
+  "keep_alive": {
+    "enabled": false,
+    "timeout_seconds": 5,
+    "max_requests": 10
+  },
+  "rate_limiter": {
+    "max_requests_per_minute": 30,
+    "max_requests_per_hour": 1000,
+    "max_burst_size": 5,
+    "max_connections_per_ip": 2,
+    "max_connection_rate": 10,
+    "max_request_size": 5000000,
+    "max_upload_size": 20000000,
+    "window_seconds": 30,
+    "ban_duration": 60,
+    "enable_ddos_protection": false,
+    "ddos_threshold": 50,
+    "ddos_window": 5
+  },
+  "logging": {
+    "log_level": 1,
+    "log_dir": ""
+  }
+}

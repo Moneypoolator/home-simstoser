@@ -234,6 +234,332 @@ The configuration file includes the following sections:
 
 All fields are optional; missing fields use the built‑in defaults.
 
+#### Authentication & Authorization Configuration
+
+The server implements a two-layer security model:
+
+1. **Authentication** (who you are) — verified via AWS Signature Version 4 using access keys
+2. **Authorization** (what you can do) — determined by user roles and resource-level ACLs
+
+##### User Records (`users.json`)
+
+Users are stored as a JSON array. Each entry defines a user's identity, role, and group memberships.
+
+**Available roles** (from [`user_role`](backend/include/authorizer.hpp:24-30)):
+
+| Role | Permissions | Description |
+|------|-------------|-------------|
+| `ADMIN` | READ, WRITE, DELETE, LIST, MANAGE_ACL | Full access to all resources |
+| `MANAGER` | READ, WRITE, DELETE, LIST | File management, no ACL management |
+| `CONTRIBUTOR` | READ, WRITE, LIST | Upload and read files |
+| `VIEWER` | READ, LIST | Read-only access |
+| `GUEST` | READ | Limited read-only access |
+
+**Example `users.json`:**
+
+```json
+[
+    {
+        "username": "admin",
+        "email": "admin@example.com",
+        "role": "ADMIN",
+        "is_active": true,
+        "groups": ["administrators"]
+    },
+    {
+        "username": "john_doe",
+        "email": "john@example.com",
+        "role": "CONTRIBUTOR",
+        "is_active": true,
+        "groups": ["users"]
+    },
+    {
+        "username": "guest",
+        "role": "GUEST",
+        "is_active": true,
+        "groups": ["guests"]
+    }
+]
+```
+
+**Fields:**
+- `username` (required) — unique login name
+- `email` (optional) — user email address
+- `role` (optional, defaults to `VIEWER`) — one of: `ADMIN`, `MANAGER`, `CONTRIBUTOR`, `VIEWER`, `GUEST`
+- `is_active` (optional, defaults to `true`) — whether the user account is active
+- `user_id` (optional) — auto-generated if omitted
+- `groups` (optional) — array of group names for group-based ACLs
+
+##### Access Keys (`access_keys.csv`)
+
+Access keys are stored in CSV format and used for AWS Signature Version 4 authentication. Each key is linked to a username from `users.json`.
+
+**Format:** `access_key_id,secret_access_key,user_name,is_active`
+
+**Example `access_keys.csv`:**
+
+```csv
+AKIA1234567890ABCDEF,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY,admin,1
+AKIA0987654321FEDCBA,abcdef1234567890abcdef1234567890abcdef12,john_doe,1
+AKIAABCDEFGHIJKLMNOP,0987654321fedcba0987654321fedcba09876543,guest,1
+```
+
+**Fields:**
+- `access_key_id` — starts with `AKIA` followed by 16 hex characters
+- `secret_access_key` — 40 random bytes encoded as hex (80 characters)
+- `user_name` — must match a `username` in `users.json`
+- `is_active` — `1` for active, `0` for inactive
+
+> **Important:** The `user_name` in the CSV links the access key to the user's role and permissions in `users.json`.
+
+##### ACL Records (`acls.json`)
+
+ACLs (Access Control Lists) define fine-grained permissions on specific resource paths. They support user-level and group-level permissions, as well as public access.
+
+**Example `acls.json`:**
+
+```json
+[
+    {
+        "resource_path": "/public",
+        "is_public": true,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {}
+    },
+    {
+        "resource_path": "/shared",
+        "is_public": false,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {
+            "users": ["READ", "WRITE", "LIST"],
+            "guests": ["READ", "LIST"]
+        }
+    },
+    {
+        "resource_path": "/admin-only",
+        "is_public": false,
+        "owner_user_id": null,
+        "user_permissions": {},
+        "group_permissions": {
+            "administrators": ["READ", "WRITE", "DELETE", "LIST", "MANAGE_ACL"]
+        }
+    }
+]
+```
+
+**Permission types** (from [`permission_type`](backend/include/authorizer.hpp:15-21)):
+- `READ` — read/download files
+- `WRITE` — write/upload files
+- `DELETE` — delete files
+- `LIST` — list directory contents
+- `MANAGE_ACL` — manage access control on the resource
+
+**Fields:**
+- `resource_path` (required) — path pattern for the resource (e.g., `/public`, `/shared/*`)
+- `is_public` (optional, defaults to `false`) — allows anonymous read/list access
+- `owner_user_id` (optional) — the user who owns the resource (gets full access)
+- `user_permissions` — map of `user_id` to array of permission strings
+- `group_permissions` — map of `group_name` to array of permission strings
+
+##### Authorization Flow
+
+The access check order in [`authorizer::check_access()`](backend/src/authorizer.cpp:794):
+
+1. **ADMIN role** → access granted unconditionally to all resources
+2. **Role-based permissions** → checked against the user's role (see table above)
+3. **Resource ownership** → owner gets full access to their resource
+4. **User-level ACL** → explicit user permissions on the resource
+5. **Group-level ACL** → permissions via group membership
+6. **Policies** → custom policy matching (if defined)
+7. **Default** → access denied
+
+##### Quick Start with Authentication
+
+Create the three files above (`users.json`, `access_keys.csv`, `acls.json`) and reference them in your config:
+
+```json
+{
+    "keys_file": "./access_keys.csv",
+    "users_file": "./users.json",
+    "acls_file": "./acls.json",
+    "enable_auth": true
+}
+```
+
+Then start the server:
+
+```bash
+./s3_server --config config.json
+```
+
+The server will log which files were loaded. If a file doesn't exist, it logs a warning and starts with an empty list — you can then create users and keys through the API or web interface.
+
+##### Generating Keys Programmatically
+
+You can generate access keys and user records programmatically using the provided tools and libraries.
+
+###### Python Script
+
+The [`generate_keys.py`](backend/rest-api/keys-generation/generate_keys.py) script creates access key pairs and saves them to a JSON file:
+
+```python
+import secrets
+import string
+
+def generate_access_key_id():
+    """Generates a public key ID starting with AKIA"""
+    chars = string.ascii_uppercase + string.digits
+    return "AKIA" + ''.join(secrets.choice(chars) for _ in range(16))
+
+def generate_secret_access_key():
+    """Generates a 40-character secret key"""
+    chars = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(chars) for _ in range(40))
+
+# Create keys for admin and regular user
+admin_key = {
+    "access_key_id": generate_access_key_id(),
+    "secret_access_key": generate_secret_access_key(),
+    "user_name": "admin",
+    "active": True
+}
+
+user_key = {
+    "access_key_id": generate_access_key_id(),
+    "secret_access_key": generate_secret_access_key(),
+    "user_name": "john_doe",
+    "active": True
+}
+```
+
+Run the script directly:
+
+```bash
+python3 backend/rest-api/keys-generation/generate_keys.py
+```
+
+###### Python Request Signing
+
+The [`sign_request.py`](backend/rest-api/keys-generation/sign_request.py) module implements AWS Signature Version 4 and generates the `Authorization` header for curl commands:
+
+```python
+from sign_request import AWSSignatureV4
+
+signer = AWSSignatureV4(
+    access_key='AKIAIOSFODNN7EXAMPLE',
+    secret_key='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+)
+
+headers = signer.sign_request(
+    method='PUT',
+    url='http://localhost:9000/test.txt',
+    headers={'Content-Type': 'text/plain'},
+    body='Hello, World!'
+)
+
+# Outputs curl-ready headers
+for key, value in headers.items():
+    print(f"  -H '{key}: {value}'")
+```
+
+###### C++ Example (Using the Authenticator Class)
+
+The [`create_access_key_example.cpp`](backend/tests/create_access_key_example.cpp) demonstrates using the C++ `authenticator` class directly:
+
+```cpp
+#include "authenticator.hpp"
+
+int main() {
+    authenticator auth;
+    
+    // Create a key for a user
+    auto key = auth.create_access_key("myuser");
+    
+    if (key) {
+        std::cout << "Access Key ID: " << key->access_key_id << std::endl;
+        std::cout << "Secret Key: " << key->secret_access_key << std::endl;
+    }
+    
+    // Save keys to CSV file
+    auth.save_keys("access_keys.csv");
+    
+    return 0;
+}
+```
+
+###### C++ Example (Using the Authorizer Class)
+
+The [`check_access_example.cpp`](backend/tests/check_access_example.cpp) demonstrates creating users and managing permissions programmatically:
+
+```cpp
+#include "authorizer.hpp"
+
+int main() {
+    authorizer auth;
+    
+    // Create users with different roles
+    auto admin = auth.create_user("admin", "admin@example.com", user_role::ADMIN);
+    auto viewer = auth.create_user("viewer", "viewer@example.com", user_role::VIEWER);
+    
+    // Make a file publicly accessible
+    auth.make_resource_public("public/document.pdf");
+    
+    // Grant specific user permission to a private file
+    auth.add_user_permission(
+        "private/report.pdf",
+        viewer->user_id,
+        permission_type::READ
+    );
+    
+    // Check access
+    bool can_read = auth.check_access(
+        viewer->user_id,
+        "private/report.pdf",
+        permission_type::READ
+    );
+    std::cout << "Viewer can read report: "
+              << (can_read ? "YES" : "NO") << std::endl;
+    
+    return 0;
+}
+```
+
+###### Shell Script (Full Authentication Flow)
+
+The [`full_example.sh`](backend/rest-api/keys-generation/full_example.sh) demonstrates the complete authentication flow with curl commands:
+
+```bash
+# Upload a file with AWS Signature V4
+curl -X PUT http://localhost:9000/hello.txt \
+  -H "Content-Type: text/plain" \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240319/us-east-1/s3/aws4_request, SignedHeaders=host;content-type;x-amz-date, Signature=fe5f80f77d5fa3beca038a2a822895d3e1f5e5d8c5b5e5d8c5b5e5d8c5b5e5d8" \
+  -H "x-amz-date: 20240319T120000Z" \
+  -H "host: localhost:9000" \
+  --data-binary "Hello, S3!"
+
+# Download the file
+curl -X GET http://localhost:9000/hello.txt \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240319/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=fe5f80f77d5fa3beca038a2a822895d3e1f5e5d8c5b5e5d8c5b5e5d8c5b5e5d8" \
+  -H "x-amz-date: 20240319T120000Z" \
+  -H "host: localhost:9000"
+
+# List files
+curl http://localhost:9000/list \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240319/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=fe5f80f77d5fa3beca038a2a822895d3e1f5e5d8c5b5e5d8c5b5e5d8c5b5e5d8" \
+  -H "x-amz-date: 20240319T120000Z" \
+  -H "host: localhost:9000"
+
+# Delete a file
+curl -X DELETE http://localhost:9000/hello.txt \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240319/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=fe5f80f77d5fa3beca038a2a822895d3e1f5e5d8c5b5e5d8c5b5e5d8c5b5e5d8" \
+  -H "x-amz-date: 20240319T120000Z" \
+  -H "host: localhost:9000"
+```
+
+> **Note:** The signature in the examples above is a placeholder. Use the Python `sign_request.py` script to generate valid signatures with your actual access keys and current timestamps.
+
 #### Compression Configuration
 
 The server supports automatic HTTP response compression using gzip and brotli algorithms. Compression reduces bandwidth usage and improves transfer speeds for text-based content (HTML, JSON, CSS, JavaScript, XML, etc.).
