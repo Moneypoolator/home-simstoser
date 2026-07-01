@@ -1,0 +1,55 @@
+{
+  "address": "0.0.0.0",
+  "port": 9000,
+  "storage_path": "./test_storage",
+  "keys_file": "",
+  "users_file": "",
+  "acls_file": "",
+  "enable_auth": false,
+  "enable_ssl": false,
+  "enable_unprotected": true,
+  "use_letsencrypt": false,
+  "letsencrypt_dir": "",
+  "ssl": null,
+  "cors": null,
+  "upload_limits": {
+    "max_file_size": 107374182400,
+    "max_part_size": 1073741824,
+    "max_parts_per_upload": 10000,
+    "max_temp_storage_total": 1099511627776
+  },
+  "keep_alive": {
+    "enabled": true,
+    "timeout_seconds": 30,
+    "max_requests": 1000
+  },
+  "rate_limiter": {
+    "max_requests_per_minute": 100000,
+    "max_requests_per_hour": 6000000,
+    "max_burst_size": 10000,
+    "max_connections_per_ip": 10000,
+    "max_connection_rate": 10000,
+    "max_request_size": 1073741824,
+    "max_upload_size": 107374182400,
+    "window_seconds": 60,
+    "ban_duration": 300,
+    "enable_ddos_protection": false,
+    "ddos_threshold": 10000,
+    "ddos_window": 10
+  },
+  "logging": {
+    "log_level": 1,
+    "log_dir": ""
+  },
+  "compression": {
+    "enabled": false,
+    "min_size": 1024,
+    "max_size": 10485760,
+    "supported_algorithms": ["gzip"],
+    "gzip_level": 6,
+    "brotli_quality": 4,
+    "compress_static": true,
+    "compress_api": true,
+    "compress_files": true
+  }
+}

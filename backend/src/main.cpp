@@ -291,6 +291,7 @@ int main(int argc, char* argv[])
     std::string acls_file = cfg.acls_file;
     bool enable_auth = cfg.enable_auth;
     bool enable_ssl = cfg.enable_ssl;
+    bool enable_unprotected = cfg.enable_unprotected;
     (void)enable_ssl;
     
     bool use_ssl = cfg.enable_ssl;
@@ -352,6 +353,8 @@ int main(int argc, char* argv[])
                 default_limits.max_temp_storage_total = std::stoull(argv[++i]);
         } else if (arg == "--no-auth") {
             enable_auth = false;
+        } else if (arg == "--unprotected" || arg == "-U") {
+            enable_unprotected = true;
         } else if (arg == "--ssl" || arg == "-S") {
             use_ssl = true;
             enable_ssl = true;
@@ -446,6 +449,8 @@ int main(int argc, char* argv[])
                       << "  -k, --keys <file>      Keys file (default: ./keys.json)\n"
                       << "  -u, --users <file>     Users file (default: ./users.json)\n"
                       << "      --no-auth          Disable authentication\n"
+                      << "  -U, --unprotected     Enable unprotected (debug) mode: disables auth, SSL,\n"
+                      << "                        rate limiting, and CORS restrictions\n"
                       << "      --ssl              Enable SSL/TLS\n"
                       << "      --letsencrypt, -L <dir> Use Let's Encrypt certificates from directory\n"
                       << "      --cert <file>      SSL certificate file\n"
@@ -472,6 +477,17 @@ int main(int argc, char* argv[])
         keys_file = "";
         users_file = "";
         acls_file = "";
+    }
+    
+    // В unprotected mode принудительно отключаем всё
+    if (enable_unprotected) {
+        keys_file = "";
+        users_file = "";
+        acls_file = "";
+        enable_auth = false;
+        use_ssl = false;
+        enable_ssl = false;
+        enable_cors = false;
     }
 
     // Установка обработчика сигналов
@@ -558,7 +574,7 @@ int main(int argc, char* argv[])
             };
         }
         
-        s3_server server(address, port, storage_path, keys_file, users_file, acls_file, ssl_cfg, cors_cfg, cfg.upload_limits, cfg.keep_alive, cfg.rate_limiter);
+        s3_server server(address, port, storage_path, keys_file, users_file, acls_file, ssl_cfg, cors_cfg, cfg.upload_limits, cfg.keep_alive, cfg.rate_limiter, enable_unprotected);
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "  S3-Compatible Storage Server" << std::endl;
@@ -566,20 +582,24 @@ int main(int argc, char* argv[])
         std::cout << "Protocol: " << (use_ssl ? "HTTPS (SSL/TLS)" : "HTTP") << std::endl;
         std::cout << "Address: " << address << ":" << port << std::endl;
         std::cout << "Storage: " << storage_path << std::endl;
-        if (!keys_file.empty()) {
-            std::cout << "Authentication: ENABLED (keys: " << keys_file << ")" << std::endl;
-        }
-        if (!users_file.empty()) {
-            std::cout << "Authorization: ENABLED (users: " << users_file << ")" << std::endl;
-        }
-        if (!acls_file.empty()) {
-            std::cout << "ACLs: ENABLED (file: " << acls_file << ")" << std::endl;
-        }
-        if (use_ssl) {
-            if (use_letsencrypt) {
-                std::cout << "Certificate: Let's Encrypt (" << cert_file << ")" << std::endl;
-            } else {
-                std::cout << "Certificate: Self-signed (" << cert_file << ")" << std::endl;
+        if (enable_unprotected) {
+            std::cout << "*** UNPROTECTED MODE *** (no auth, no SSL, no rate limiting)" << std::endl;
+        } else {
+            if (!keys_file.empty()) {
+                std::cout << "Authentication: ENABLED (keys: " << keys_file << ")" << std::endl;
+            }
+            if (!users_file.empty()) {
+                std::cout << "Authorization: ENABLED (users: " << users_file << ")" << std::endl;
+            }
+            if (!acls_file.empty()) {
+                std::cout << "ACLs: ENABLED (file: " << acls_file << ")" << std::endl;
+            }
+            if (use_ssl) {
+                if (use_letsencrypt) {
+                    std::cout << "Certificate: Let's Encrypt (" << cert_file << ")" << std::endl;
+                } else {
+                    std::cout << "Certificate: Self-signed (" << cert_file << ")" << std::endl;
+                }
             }
         }
         std::cout << "Press Ctrl+C to stop" << std::endl;

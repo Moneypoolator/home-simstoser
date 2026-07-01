@@ -18,7 +18,8 @@ s3_server::s3_server(const std::string& address,
     std::optional<cors_config> cors_cfg,
     upload_limits_config upload_limits,
     keep_alive_config keep_alive,
-    rate_limiter_config rate_limiter)
+    rate_limiter_config rate_limiter,
+    bool enable_unprotected)
     : _address(address)
     , _port(port)
     , _storage_path(storage_path)
@@ -30,10 +31,34 @@ s3_server::s3_server(const std::string& address,
     , _cleanup_timer(_io_context)
     , _ssl_config(std::move(ssl_cfg))
     , _cors_config(std::move(cors_cfg))
+    , _unprotected(enable_unprotected)
     , _upload_limits(std::move(upload_limits))
     , _keep_alive_config(std::move(keep_alive))
     , _rate_limiter_config(std::move(rate_limiter))
 {
+    if (_unprotected) {
+        LOG(WARNING) << "============================================";
+        LOG(WARNING) << "  UNPROTECTED MODE ENABLED";
+        LOG(WARNING) << "  Authentication, authorization, SSL, rate";
+        LOG(WARNING) << "  limiting and CORS restrictions are OFF.";
+        LOG(WARNING) << "  This mode is for DEBUG/TEST only!";
+        LOG(WARNING) << "============================================";
+        
+        // Force-disable all security features
+        _ssl_enabled = false;
+        _auth_enabled = false;
+        _authorization_enabled = false;
+        _ssl_config = std::nullopt;
+        _cors_config = std::nullopt;
+        _authenticator = nullptr;
+        _authorizer = nullptr;
+        _rate_limiter = nullptr;
+        
+        LOG(INFO) << "S3 server created in UNPROTECTED mode: " << address << ":" << port;
+        LOG(INFO) << "Storage path: " << storage_path;
+        return;
+    }
+    
     _ssl_enabled = _ssl_config.has_value();
     
     // Инициализируем аутентификатор, если указан файл ключей
@@ -395,8 +420,8 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
         }
     };
     
-    // Rate limiting для соединения
-    if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+    // Rate limiting для соединения (skipped in unprotected mode)
+    if (!_unprotected && _rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
         if (!_rate_limiter->allow_connection(clean_ip)) {
             LOG(WARNING) << "Connection rate limit exceeded for IP: " << clean_ip;
             socket.close(ec);
@@ -452,8 +477,8 @@ void s3_server::handle_session(tcp::socket socket, const std::string& client_ip)
             // Determine if we should keep the connection alive
             keep_alive = should_keep_alive(req) && _keep_alive_config.enabled;
             
-            // Rate limiting для запроса
-            if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+            // Rate limiting для запроса (skipped in unprotected mode)
+            if (!_unprotected && _rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
                 if (!_rate_limiter->allow_request(clean_ip)) {
                     LOG(WARNING) << "Rate limit exceeded for IP: " << clean_ip;
                     http::response<http::string_body> res{http::status::too_many_requests, 11};
@@ -619,8 +644,8 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
         }
     };
     
-    // Rate limiting для соединения
-    if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+    // Rate limiting для соединения (skipped in unprotected mode)
+    if (!_unprotected && _rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
         if (!_rate_limiter->allow_connection(clean_ip)) {
             LOG(WARNING) << "SSL connection rate limit exceeded for IP: " << clean_ip;
             socket.next_layer().close(ec);
@@ -676,8 +701,8 @@ void s3_server::handle_ssl_session(ssl::stream<tcp::socket> socket, const std::s
             // Determine if we should keep the connection alive
             keep_alive = should_keep_alive(req) && _keep_alive_config.enabled;
             
-            // Rate limiting для запроса
-            if (_rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
+            // Rate limiting для запроса (skipped in unprotected mode)
+            if (!_unprotected && _rate_limiter && !clean_ip.empty() && clean_ip != "unknown") {
                 if (!_rate_limiter->allow_request(clean_ip)) {
                     LOG(WARNING) << "SSL rate limit exceeded for IP: " << clean_ip;
                     http::response<http::string_body> res{http::status::too_many_requests, 11};

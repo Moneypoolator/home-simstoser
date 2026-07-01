@@ -90,6 +90,7 @@ void from_json(const nlohmann::json& j, server_config& cfg) {
     if (j.contains("acls_file")) j.at("acls_file").get_to(cfg.acls_file);
     if (j.contains("enable_auth")) j.at("enable_auth").get_to(cfg.enable_auth);
     if (j.contains("enable_ssl")) j.at("enable_ssl").get_to(cfg.enable_ssl);
+    if (j.contains("enable_unprotected")) j.at("enable_unprotected").get_to(cfg.enable_unprotected);
     if (j.contains("use_letsencrypt")) j.at("use_letsencrypt").get_to(cfg.use_letsencrypt);
     if (j.contains("letsencrypt_dir")) j.at("letsencrypt_dir").get_to(cfg.letsencrypt_dir);
     
@@ -151,6 +152,7 @@ void to_json(nlohmann::json& j, const server_config& cfg) {
     j["acls_file"] = cfg.acls_file;
     j["enable_auth"] = cfg.enable_auth;
     j["enable_ssl"] = cfg.enable_ssl;
+    j["enable_unprotected"] = cfg.enable_unprotected;
     j["use_letsencrypt"] = cfg.use_letsencrypt;
     j["letsencrypt_dir"] = cfg.letsencrypt_dir;
     

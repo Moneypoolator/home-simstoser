@@ -192,6 +192,7 @@ This starts the server with default settings:
 | `--keys` | `-k` | Access keys file (CSV format) | `./access_keys.csv` |
 | `--users` | `-u` | Users file (CSV format) | `./users.csv` |
 | `--no-auth` | | Disable authentication (allows anonymous access) | `false` |
+| `--unprotected` | `-U` | **Unprotected (debug) mode**: disables authentication, authorization, SSL, rate limiting, and CORS restrictions. For debugging/testing only. | `false` |
 | `--ssl` | `-S` | Enable SSL/TLS (HTTPS) with self-signed certificate | `false` |
 | `--letsencrypt`, `-L` | | Use Let's Encrypt certificates from directory | (none) |
 | `--cert` | | SSL certificate file (alternative to --letsencrypt) | `./certs/server.crt` |
@@ -223,7 +224,7 @@ Command‑line arguments override values from the configuration file.
 
 The configuration file includes the following sections:
 
-- **Server basics** (`address`, `port`, `storage_path`, `keys_file`, `users_file`, `enable_auth`, `enable_ssl`, `use_letsencrypt`)
+- **Server basics** (`address`, `port`, `storage_path`, `keys_file`, `users_file`, `enable_auth`, `enable_ssl`, `enable_unprotected`, `use_letsencrypt`)
 - **SSL configuration** (`ssl`) – certificate paths and client verification
 - **CORS configuration** (`cors`) – allowed origins, methods, headers, etc.
 - **Upload limits** (`upload_limits`) – maximum file size, part size, etc.
@@ -334,6 +335,7 @@ Users are stored as a JSON array. Each entry defines a user's identity, role, an
 ```
 
 **Fields:**
+
 - `username` (required) — unique login name
 - `email` (optional) — user email address
 - `role` (optional, defaults to `VIEWER`) — one of: `ADMIN`, `MANAGER`, `CONTRIBUTOR`, `VIEWER`, `GUEST`
@@ -356,6 +358,7 @@ AKIAABCDEFGHIJKLMNOP,0987654321fedcba0987654321fedcba09876543,guest,1
 ```
 
 **Fields:**
+
 - `access_key_id` — starts with `AKIA` followed by 16 hex characters
 - `secret_access_key` — 40 random bytes encoded as hex (80 characters)
 - `user_name` — must match a `username` in `users.json`
@@ -401,6 +404,7 @@ ACLs (Access Control Lists) define fine-grained permissions on specific resource
 ```
 
 **Permission types** (from [`permission_type`](backend/include/authorizer.hpp:15-21)):
+
 - `READ` — read/download files
 - `WRITE` — write/upload files
 - `DELETE` — delete files
@@ -408,6 +412,7 @@ ACLs (Access Control Lists) define fine-grained permissions on specific resource
 - `MANAGE_ACL` — manage access control on the resource
 
 **Fields:**
+
 - `resource_path` (required) — path pattern for the resource (e.g., `/public`, `/shared/*`)
 - `is_public` (optional, defaults to `false`) — allows anonymous read/list access
 - `owner_user_id` (optional) — the user who owns the resource (gets full access)
@@ -698,7 +703,31 @@ curl --compressed http://localhost:9000/list
    ./s3_server --no-auth
    ```
 
-5. **Configure CORS for specific origins:**
+5. **Run in unprotected (debug) mode:**
+
+   ```bash
+   ./s3_server --unprotected
+   # or with short option
+   ./s3_server -U
+   ```
+
+   Unprotected mode disables all security features for debugging and testing:
+   - ❌ Authentication (AWS Signature V4 verification)
+   - ❌ Authorization (user roles, ACLs, policies)
+   - ❌ SSL/TLS (plain HTTP only)
+   - ❌ Rate limiting (no connection/request limits)
+   - ❌ CORS restrictions (permissive defaults still apply)
+   - ❌ Certificate loading/generation
+
+   You can also use the provided config file:
+
+   ```bash
+   ./s3_server --config configs/config.unprotected.json
+   ```
+
+   > **⚠️ WARNING:** Unprotected mode is intended **only** for local development, debugging, and testing. Never use it in production or on publicly accessible networks. The server will log a prominent warning on startup when this mode is active.
+
+6. **Configure CORS for specific origins:**
 
    ```bash
    # Allow only specific origins with custom headers
@@ -710,13 +739,13 @@ curl --compressed http://localhost:9000/list
 
    *Note: CORS is enabled by default with permissive settings (`*` origin). Use `--no-cors` to disable CORS entirely.*
 
-6. **Run with verbose logging:**
+7. **Run with verbose logging:**
 
    ```bash
    ./s3_server --log-level 2 --log-dir ./logs
    ```
 
-7. **Run in background:**
+8. **Run in background:**
 
    ```bash
    nohup ./s3_server > server.log 2>&1 &

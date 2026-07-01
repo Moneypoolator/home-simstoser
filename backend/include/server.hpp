@@ -129,7 +129,8 @@ public:
               std::optional<cors_config> cors_cfg = std::nullopt,
               upload_limits_config upload_limits = upload_limits_config(),
               keep_alive_config keep_alive = keep_alive_config(),
-              rate_limiter_config rate_limiter = rate_limiter_config());
+              rate_limiter_config rate_limiter = rate_limiter_config(),
+              bool enable_unprotected = false);
     
     ~s3_server();
     
@@ -138,6 +139,7 @@ public:
     
     [[nodiscard]] bool is_ssl_enabled() const { return _ssl_enabled; }
     [[nodiscard]] bool is_auth_enabled() const { return _auth_enabled; }
+    [[nodiscard]] bool is_unprotected() const { return _unprotected; }
     
 private:
     std::string _address;
@@ -161,6 +163,7 @@ private:
     bool _ssl_enabled = false;
     bool _auth_enabled = false;
     bool _authorization_enabled = false;
+    bool _unprotected = false;
     std::shared_ptr<authenticator> _authenticator;
     std::shared_ptr<authorizer> _authorizer;
     std::unique_ptr<rate_limiter> _rate_limiter;

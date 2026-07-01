@@ -19,6 +19,7 @@ struct server_config {
     std::string acls_file = "./acls.json";
     bool enable_auth = true;
     bool enable_ssl = false;
+    bool enable_unprotected = false; // Debug mode: disables auth, SSL, rate limiting, CORS restrictions
     bool use_letsencrypt = false;
     std::string letsencrypt_dir = "";
     
