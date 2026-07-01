@@ -59,6 +59,9 @@ public:
     // Получить ключ доступа по ID
     std::optional<access_key> get_key(const std::string& access_key_id) const;
     
+    // Найти ключ доступа по имени пользователя (возвращает первый активный ключ)
+    std::optional<access_key> find_key_by_username(const std::string& username) const;
+    
     // Список всех ключей доступа
     std::vector<access_key> list_keys() const;
     

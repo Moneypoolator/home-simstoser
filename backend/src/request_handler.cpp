@@ -116,6 +116,108 @@ request_handler::auth_result request_handler::authenticate_request(
     return {true, std::nullopt, std::nullopt};
 }
 
+// ========== LOGIN ENDPOINT ==========
+
+http::response<http::string_body> request_handler::handle_login(
+    const http::request<http::string_body>& req)
+{
+    LOG(INFO) << "handle_login: processing login request";
+    
+    // Parse JSON body
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse(req.body());
+    } catch (const nlohmann::json::parse_error& e) {
+        LOG(WARNING) << "handle_login: invalid JSON body: " << e.what();
+        return create_error_response(
+            http::status::bad_request,
+            "InvalidJson",
+            "Invalid JSON in request body"
+        );
+    }
+    
+    // Extract username and password
+    std::string username;
+    std::string password;
+    try {
+        username = body.at("username").get<std::string>();
+        password = body.at("password").get<std::string>();
+    } catch (const nlohmann::json::exception& e) {
+        LOG(WARNING) << "handle_login: missing username or password field: " << e.what();
+        return create_error_response(
+            http::status::bad_request,
+            "MissingFields",
+            "Request must include 'username' and 'password' fields"
+        );
+    }
+    
+    if (username.empty() || password.empty()) {
+        LOG(WARNING) << "handle_login: empty username or password";
+        return create_error_response(
+            http::status::bad_request,
+            "MissingFields",
+            "Username and password must not be empty"
+        );
+    }
+    
+    LOG(INFO) << "handle_login: looking up access key for user: " << username;
+    
+    // Look up the user's access key by username
+    if (!_authenticator) {
+        LOG(WARNING) << "handle_login: authenticator not available";
+        return create_error_response(
+            http::status::internal_server_error,
+            "AuthNotConfigured",
+            "Authentication is not configured on this server"
+        );
+    }
+    
+    auto key_opt = _authenticator->find_key_by_username(username);
+    if (!key_opt) {
+        LOG(WARNING) << "handle_login: no active access key found for user: " << username;
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidCredentials",
+            "Invalid username or password"
+        );
+    }
+    
+    // Verify the password (secret access key)
+    if (key_opt->secret_access_key != password) {
+        LOG(WARNING) << "handle_login: invalid password for user: " << username;
+        return create_error_response(
+            http::status::unauthorized,
+            "InvalidCredentials",
+            "Invalid username or password"
+        );
+    }
+    
+    // Get user info from authorizer if available
+    std::string user_id = username;
+    if (_authorizer) {
+        auto user_opt = _authorizer->get_user_by_name(username);
+        if (user_opt) {
+            user_id = user_opt->user_id;
+        }
+    }
+    
+    LOG(INFO) << "handle_login: login successful for user: " << username;
+    
+    // Build response
+    nlohmann::json response_json = {
+        {"access_key_id", key_opt->access_key_id},
+        {"secret_access_key", key_opt->secret_access_key},
+        {"user_id", user_id},
+        {"username", username}
+    };
+    
+    return create_response(
+        http::status::ok,
+        response_json.dump(),
+        "application/json"
+    );
+}
+
 // ========== АВТОРИЗАЦИЯ ==========
 
 bool request_handler::authorize_request(

@@ -236,10 +236,61 @@ All fields are optional; missing fields use the built‑in defaults.
 
 #### Authentication & Authorization Configuration
 
+> **Important:** This server does **not** use traditional username/password login. Instead, it uses **AWS Signature Version 4** authentication with **access key pairs** — the same system used by Amazon S3. Each user has an **Access Key ID** (like a username) and a **Secret Access Key** (like a password). These are used to cryptographically sign every API request.
+
 The server implements a two-layer security model:
 
-1. **Authentication** (who you are) — verified via AWS Signature Version 4 using access keys
+1. **Authentication** (who you are) — verified via AWS Signature Version 4 using access key pairs
 2. **Authorization** (what you can do) — determined by user roles and resource-level ACLs
+
+##### Default User Credentials (Passwords)
+
+The provided [`configs/access_keys.csv`](configs/access_keys.csv) file defines the following default credentials. The **Secret Access Key** is the equivalent of a password:
+
+| Username | Role | Access Key ID (login) | Secret Access Key (password) |
+|----------|------|-----------------------|------------------------------|
+| `admin` | ADMIN | `AKIA1234567890ABCDEF` | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `john_doe` | CONTRIBUTOR | `AKIA0987654321FEDCBA` | `abcdef1234567890abcdef1234567890abcdef12` |
+| `guest` | GUEST | `AKIAABCDEFGHIJKLMNOP` | `0987654321fedcba0987654321fedcba09876543` |
+
+##### Logging in with the WPF Desktop GUI
+
+The WPF GUI application ([`GUI-WPF/`](GUI-WPF/)) provides a login dialog that accepts **Username** and **Password**. When you enter your credentials:
+
+1. **Username**: Enter your username (e.g., `admin`, `john_doe`, `guest`)
+2. **Password**: Enter your **Secret Access Key** (the password equivalent from the table above)
+
+The GUI sends a `POST /auth/login` request to the server, which looks up your access key by username and verifies the secret key. On success, it receives your `access_key_id` and `secret_access_key` and uses them to sign all subsequent API requests via AWS Signature V4.
+
+**Default credentials for the WPF GUI:**
+
+| Username | Password (Secret Access Key) |
+|----------|------------------------------|
+| `admin` | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `john_doe` | `abcdef1234567890abcdef1234567890abcdef12` |
+| `guest` | `0987654321fedcba0987654321fedcba09876543` |
+
+> **Note:** The password field expects the **Secret Access Key**, not a traditional password. The hint text in the login dialog shows the correct credentials for the `admin` user.
+
+To authenticate programmatically (AWS CLI, Boto3, curl with SigV4), you use these credentials to sign requests using AWS Signature Version 4. Most S3-compatible clients handle the signing automatically — you just provide the Access Key ID and Secret Access Key.
+
+**Example with AWS CLI:**
+
+```bash
+aws configure set aws_access_key_id AKIA1234567890ABCDEF
+aws configure set aws_secret_access_key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws configure set default.s3.endpoint_url http://localhost:9000
+aws s3 ls s3:///
+```
+
+**Example with curl (manual signing):**
+
+```bash
+# Using the Python sign_request.py to generate the Authorization header
+python3 backend/rest-api/keys-generation/sign_request.py
+```
+
+Or use the provided [`full_example.sh`](backend/rest-api/keys-generation/full_example.sh) script as a reference for manual request signing.
 
 ##### User Records (`users.json`)
 
@@ -377,13 +428,13 @@ The access check order in [`authorizer::check_access()`](backend/src/authorizer.
 
 ##### Quick Start with Authentication
 
-Create the three files above (`users.json`, `access_keys.csv`, `acls.json`) and reference them in your config:
+Default configuration files are provided in the [`configs/`](configs/) directory. Reference them in your config:
 
 ```json
 {
-    "keys_file": "./access_keys.csv",
-    "users_file": "./users.json",
-    "acls_file": "./acls.json",
+    "keys_file": "./configs/access_keys.csv",
+    "users_file": "./configs/users.json",
+    "acls_file": "./configs/acls.json",
     "enable_auth": true
 }
 ```

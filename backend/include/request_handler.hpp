@@ -83,6 +83,22 @@ public:
             normalized_path = normalized_path.substr(4);
         }
         
+        // Login endpoint - handled before authentication so users can log in without credentials
+        if (path == "/auth/login" && req.method() == http::verb::post) {
+            response = handle_login(req);
+            apply_cors_headers(response, req);
+            apply_compression_if_needed(response, req);
+            response.prepare_payload();
+            metrics::MetricsCollector::instance().record_request(
+                std::string(req.method_string()),
+                std::string(req.target()),
+                static_cast<int>(response.result()),
+                timer.elapsed()
+            );
+            send(std::move(response));
+            return;
+        }
+        
         // Обслуживание статических файлов веб-интерфейса
         if (is_static_file_request(path)) {
             response = handle_static_file(path);
@@ -251,6 +267,7 @@ public:
     http::response<http::string_body> handle_list(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_get_progress(const http::request<http::string_body>& req);
     http::response<http::string_body> handle_metrics(const http::request<http::string_body>& req);
+    http::response<http::string_body> handle_login(const http::request<http::string_body>& req);
 
     http::response<http::string_body> create_response(
         http::status status,

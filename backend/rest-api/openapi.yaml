@@ -68,6 +68,8 @@ tags:
     description: Управление многокомпонентной загрузкой
   - name: Static Files
     description: Обслуживание статических файлов веб-интерфейса
+  - name: Authentication
+    description: Аутентификация пользователей (логин)
 
 components:
   securitySchemes:
@@ -835,6 +837,73 @@ paths:
               schema:
                 type: string
               example: "Access denied"
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login with username and secret access key
+      description: |
+        Authenticates a user by looking up their access key by username and verifying the secret access key.
+        Returns the user's access key ID and secret access key for subsequent API requests signed with AWS Signature V4.
+        
+        This endpoint does **not** require AWS Signature V4 authentication — it uses simple username/password
+        authentication so that clients (like the WPF GUI) can obtain credentials to sign subsequent requests.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: Username (e.g., admin, john_doe, guest)
+                  example: admin
+                password:
+                  type: string
+                  description: Secret Access Key (the password equivalent)
+                  example: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_key_id:
+                    type: string
+                    description: Access Key ID for signing subsequent requests
+                    example: AKIA1234567890ABCDEF
+                  secret_access_key:
+                    type: string
+                    description: Secret Access Key for signing subsequent requests
+                    example: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                  user_id:
+                    type: string
+                    description: User ID
+                    example: admin
+                  username:
+                    type: string
+                    description: Username
+                    example: admin
+        '400':
+          description: Bad request (missing or invalid fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 # ========== Security ==========
 security:

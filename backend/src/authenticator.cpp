@@ -379,6 +379,19 @@ std::optional<access_key> authenticator::get_key(const std::string& access_key_i
     return it->second;
 }
 
+std::optional<access_key> authenticator::find_key_by_username(const std::string& username) const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    
+    for (const auto& [id, key] : _keys) {
+        if (key.user_name == username && key.is_active) {
+            return key;
+        }
+    }
+    
+    LOG(WARNING) << "No active access key found for user: " << username;
+    return std::nullopt;
+}
+
 std::vector<access_key> authenticator::list_keys() const {
     std::lock_guard<std::mutex> lock(_mutex);
     

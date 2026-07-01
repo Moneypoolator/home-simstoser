@@ -83,7 +83,7 @@
                        Click="BtnLogin_Click" />
 
                 <!-- Test credentials info -->
-                <TextBlock Text="Test credentials:&#x0a;username: admin&#x0a;password: admin123"
+                <TextBlock Text="Test credentials:&#x0a;username: admin&#x0a;password: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
                          FontSize="11"
                          Foreground="#9CA3AF"
                          TextAlignment="Center"
